@@ -1,17 +1,17 @@
 function [ xx, yy, k, tt, uu, Eu, Eu_SSAV, Em, mass, m_est_vals, t_vals, dt_vals] = ...
-    SSAV_2D ( nx, ny, Lx, Ly, dt, tmax, alpha, epsilon, m, u, model, beta)
+    SSAV_2D ( nx, ny, Lx, Ly, dt, tmax, Para, u, model)
 
 
-B = 1;          % const. that ensures positive radicand
-S = 2;          % positive stabilizing parameter S ~ ||f(u)||_\infty
+% B = 1;          % const. that ensures positive radicand
+% S = 2;          % positive stabilizing parameter S ~ ||f(u)||_\infty
 
 err_tol = 10E-5;        % error tolerance
 rho_s = 0.9;            % safety coeff 
 
-dt_min = 0.5;        % min time step
-dt_max = 0.5;          % max time step
+dt_min = 0.001;        % min time step
+dt_max = 0.01;          % max time step
 
-dt = dt_min;
+dt = dt_max;
 
 % spatial grid
 dx = Lx/nx;                         dy = Ly/ny;
@@ -27,9 +27,7 @@ k = sqrt(kkx.^2 + kky.^2);
 k = k(:);
 
 inv_k = 1./(k.^2);      inv_k(k == 0) = 1;
-% inv_k = spdiags(inv_k(:), 0, nx*ny, nx*ny);
 
-% k = spdiags(k(:), 0, nx*ny, nx*ny);
 
 if model == 3
 
@@ -60,11 +58,11 @@ nplt = floor( (tmax / 100) / dt_max);
 %%%%%%%% Compute u^1 using backward Euler %%%%%%%% 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-F = compute_F(u, beta);         int_F = sum(F(:)) * dx*dy;
-f = compute_f(u, beta);
+F = compute_F(u, Para.beta);         int_F = sum(F(:)) * dx*dy;
+f = compute_f(u, Para.beta);
 
 % define the following as w_old b/c we will need this in the for loop
-w_old = compute_w(int_F, B);   
+w_old = compute_w(int_F, Para.B);   
 
 w_vals = zeros(1,101);
 w_vals(1) = w_old;
@@ -81,40 +79,41 @@ mass(1) = (sum(u(:))*dx*dy)/(Lx*Ly);
 
 m_est_vals = zeros(1, 100);
 
-Em = sum(sum((compute_F(m*ones(size(u)), beta))))*dx*dy;
-% Em = 0;
+Em = sum(sum((compute_F(Para.m*ones(size(u)), Para.beta))))*dx*dy;
 
 Eu = zeros(1, 101);
 Eu_SSAV = zeros(1,100);
 
-Eu(1) = compute_En(u, w_old, m, dx, dy, inv_k, k, epsilon, alpha, B, Em, G, D, model);
+Eu(1) = compute_En(u, w_old, Para, dx, dy, inv_k, k, Em, G, D, model);
 
 H = compute_H(f, w_old);
 
 r = -0.5 * sum(sum(H.*u)) * dx*dy + w_old;
 H2 = fftn(H);
-r_tilde = u/dt - S*real(ifftn(reshape(-k.^2 .* v(:),nx,ny))) - ...
+r_tilde = u/dt - Para.S*real(ifftn(reshape(-k.^2 .* v(:),nx,ny))) - ...
     r*real(ifftn(reshape(-k.^2 .* H2(:),nx,ny)));
-% r_tilde = reshape(r_tilde, nx, ny);
-r_hat = (alpha*epsilon^2*dt)/(Lx*Ly) * sum(r_tilde(:))*dx*dy + r_tilde;
 
-% r_hat = (alpha*epsilon^2*dt)/(Lx*Ly) * mass(1) + r_tilde;
-% r_hat = m + r_tilde;
-m_est_vals(1) = (alpha*epsilon^2*dt)/(Lx*Ly) * sum(r_tilde(:))*dx*dy;
+r_hat = (Para.alpha*Para.epsilon^2*dt)/(Lx*Ly) * sum(r_tilde(:))*dx*dy + r_tilde;
 
-% define P for BDF1
-% P = spdiags(1/dt + alpha*epsilon^2 + S*k.^2 + epsilon^2*k.^4, ...
-%     0, nx*ny, nx*ny);
+
+m_est_vals(1) = (Para.alpha*Para.epsilon^2*dt)/(Lx*Ly) * sum(r_tilde(:))*dx*dy;
+
 
 if model == 3
-    P = spdiags(1/dt + alpha*epsilon^2 - S*G - epsilon^2*G.*D.^2, ...
-        0, nx*ny, nx*ny);
+    % P = spdiags(1/dt + alpha*epsilon^2 - S*G - epsilon^2*G.*D.^2, ...
+    %     0, nx*ny, nx*ny);
+
+    P1 = alpha*epsilon^2 - Para.S*G - Para.epsilon^2*G.*D.^2;
 
 else
-    P = spdiags(1/dt + alpha*epsilon^2 - S*G + epsilon^2*G.*D.^2, ...
-        0, nx*ny, nx*ny);
+    % P = spdiags(1/dt + alpha*epsilon^2 - S*G + epsilon^2*G.*D.^2, ...
+    %     0, nx*ny, nx*ny);
+
+    P1 = Para.alpha*Para.epsilon^2 - Para.S*G + Para.epsilon^2*G.*D.^2;
 
 end
+
+P = spdiags(1/dt + P1, 0, nx*ny, nx*ny);
 
 r_hat = fftn(r_hat);
 psi_r = P \ r_hat(:);
@@ -134,10 +133,9 @@ u = 0.5*innprod_Hu * psi_H + psi_r;
 dt_vals = dt;
 
 t = t + dt;
-% define P for BDF2
-% P = spdiags(3/(2*dt) + alpha*epsilon^2 + S*k.^2 + epsilon^2*k.^4, ...
-%     0, nx*ny, nx*ny);
+
 t_vals = [0; t];
+
 if nplt == 1
     
     uu{2} = u;    
@@ -146,16 +144,13 @@ if nplt == 1
 
     w_vals(2) = w;
     
-    Eu(2) = compute_En(u, w, m, dx, dy, inv_k, k, epsilon, alpha, B, Em, G, D, model);
-    
-    % Eu_SSAV(1) = compute_En_SSAV(u, u_old, w, w_old, m, dx, dy, inv_k,...
-    %     k, epsilon, alpha, B, Eu(2), Em, S);
+    Eu(2) = compute_En(u, w, Para, dx, dy, inv_k, k, Em, G, D, model);    
 
     Eu_SSAV(1) = (Eu(2))/2 + (compute_En(2*u - u_old, 2*w - w_old, ...
-        m, dx, dy, inv_k, k, epsilon, alpha, B, Em, G, D, model)) / 2 + ...
+        Para, dx, dy, inv_k, k, Em, G, D, model)) / 2 + ...
         sum(sum(S/2 * (u(:) - u_old(:)).^2))*dx*dy;
 
-    m_est_vals(1) = (alpha*epsilon^2*dt)/(Lx*Ly) * sum(r_tilde(:))*dx*dy;
+    m_est_vals(1) = (Para.alpha*Para.epsilon^2*dt)/(Lx*Ly) * sum(r_tilde(:))*dx*dy;
     
     mass(2) = sum(sum(u))*dx*dy/(Lx*Ly);
     
@@ -169,51 +164,16 @@ j = 1;
 
 
 while t < tmax
-% for j = 2 : nmax
 
-    % t = j * dt;
 
     j = j + 1;
 
     dt_new = dt;
     
-    % u_snew = compute_u_snew(u, u_old);
-    % 
-    % F = compute_F(u_snew);
-    % f = compute_f(u_snew);
-    % 
-    % int_F = sum(F(:)) * dx*dy;
-    % 
-    % %w(u^{*,n+1})
-    % w_snew = compute_w(int_F, B);
-    % 
-    % % H^{*,n+1}
-    % H_snew = compute_H(f, w_snew);
-    % 
-    % [a, b, c, gamma] =  compute_dt_coeffs(k, dt_new);
-    % 
-    % [r, r_hat, m_est] = compute_r(u_snew, u, u_old, w, w_old, H_snew, S, ...
-    %     dx, dy, dt_new, k, Lx, Ly, nx, ny, alpha, epsilon, a, b, c);
-    % 
-    % P = defn_P(a, dt_new, S, k, alpha, epsilon, nx, ny);
-    % 
-    % r_hat = fftn(r_hat);
-    % H2 = fftn(H_snew);
-    % psi_r = P \ r_hat(:);           psi_r = reshape(psi_r, nx, ny);
-    % psi_r = real(ifftn(psi_r));
-    % psi_H = P \ (-k.^2.*H2(:));     psi_H = reshape(psi_H, nx, ny);
-    % psi_H = real(ifftn(psi_H));
-    % 
-    % innprod_Hu = compute_ip(H_snew, psi_r, psi_H, dx, dy);
-    % 
-    % w_new = 0.5*innprod_Hu + r;      
-    % 
-    % u_new = 0.5*innprod_Hu * psi_H + psi_r;
-
     
     [u_new, w_new, m_est, gamma] = compute_unew(u, u_old, w, w_old, ...
-        dx, dy, dt, dt_new, Lx, Ly, nx, ny, k, S, B, alpha, epsilon, G, D,...
-        model, beta);
+        dx, dy, dt, dt_new, Lx, Ly, nx, ny, k, Para, G, D,...
+        model, P1);
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %%%%%%%%%%%%%%%%% Adaptive time stepping %%%%%%%%%%%%%%%%%
@@ -222,14 +182,14 @@ while t < tmax
     % Use u_new as the 2nd order accurate primary approx \tilde{u}^{n+1}
 
     % compute the 3rd order accurate approx u_p via AM3
-    u_p = AM3_up(u_new, u, u_old, epsilon, alpha, gamma, k, ...
-    dt_new, m, nx, ny, beta);
+    u_p = AM3_up(u_new, u, u_old, Para.epsilon, Para.alpha, gamma, k, ...
+    dt_new, Para.m, nx, ny, Para.beta);
 
     % calculate the relative error approx
     rel_err = (sqrt(sum(sum((u_new - u_p).^2)) / (nx*ny))) / ...
         (sqrt(sum(sum(u_p.^2)) / (nx*ny)));
 
-    A_dp = compute_A_dp(rho_s, err_tol, rel_err, dt_new);
+    A_dp = compute_A_dp(Para.rho_s, err_tol, rel_err, dt_new);
 
     if ((rel_err < err_tol) || (dt_new == dt_min))
 
@@ -252,18 +212,18 @@ while t < tmax
            dt_new = max(dt_min, min(A_dp, dt_max));
 
            [u_new, w_new, m_est, gamma] = compute_unew(u, u_old, w, ... 
-               w_old, dx, dy, dt, dt_new, Lx, Ly, nx, ny, k, S, B, ...
-               alpha, epsilon, G, D, model, beta);
+               w_old, dx, dy, dt, dt_new, Lx, Ly, nx, ny, k, Para, ...
+               G, D, model, P1);
 
-           u_p = AM3_up(u_new, u, u_old, epsilon, alpha, gamma, k, ...
-               dt_new, m, nx, ny, beta);
+           u_p = AM3_up(u_new, u, u_old, Para.epsilon, Para.alpha, gamma, k, ...
+               dt_new, Para.m, nx, ny, Para.beta);
 
            % calculate the relative error approx
 
            rel_err = (sqrt(sum(sum((u_new - u_p).^2)) / (nx*ny))) / ...
                (sqrt(sum(sum(u_p.^2)) / (nx*ny)));
 
-           A_dp = compute_A_dp(rho_s, err_tol, rel_err, dt_new);
+           A_dp = compute_A_dp(Para.rho_s, err_tol, rel_err, dt_new);
            
 
         end
@@ -277,22 +237,16 @@ while t < tmax
 
     end
 
-    % w_old = w;                      w = w_new;
-    % u_old = u;                      u = u_new;
-
 
     if (mod(j, nplt) == 0)                  
 
-        Eu(j/nplt + 1) = compute_En(u, w, m, dx, dy, inv_k, k, epsilon,...
-            alpha, B, Em, G, D, model);
-        
-        % Eu_SSAV(j/nplt) = compute_En_SSAV(u, u_old, w, w_old, m, dx, dy, inv_k,...
-        %     k, epsilon, alpha, B, Eu(j/nplt + 1), Em, S);
+        Eu(j/nplt + 1) = compute_En(u, w, Para, dx, dy, inv_k, k,...
+            Em, G, D, model);
 
         Eu_SSAV(j/nplt) = (Eu(j/nplt + 1))/2 + ...
-            (compute_En(2*u - u_old, 2*w - w_old, m, dx, dy, inv_k, k, ...
-            epsilon, alpha, B, Em, G, D, model))/ 2 + ...
-            sum(sum(S/2 * (u(:) - u_old(:)).^2))*dx*dy;
+            (compute_En(2*u - u_old, 2*w - w_old, Para, dx, dy, inv_k, k, ...
+            Em, G, D, model))/ 2 + ...
+            sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*dx*dy;
         
         mass(j/nplt + 1) = sum(sum(u))*dx*dy/(Lx*Ly);
 
@@ -302,22 +256,18 @@ while t < tmax
         
         tt(j/nplt + 1) = t;
 
-        % w_vals(j/nplt + 1) = w;
     end
     t_vals = [t_vals; t];
 end
 
 if (mod(j, nplt) ~= 0) 
-    Eu(end + 1) = compute_En(u, w, m, dx, dy, inv_k, k, epsilon,...
-        alpha, B, Em, G, D, model);
-    
-    % Eu_SSAV(j/nplt) = compute_En_SSAV(u, u_old, w, w_old, m, dx, dy, inv_k,...
-    %     k, epsilon, alpha, B, Eu(j/nplt + 1), Em, S);
+    Eu(end + 1) = compute_En(u, w, Para, dx, dy, inv_k, k,...
+        Em, G, D, model);
     
     Eu_SSAV(end + 1) = (Eu(end))/2 + ...
-        (compute_En(2*u - u_old, 2*w - w_old, m, dx, dy, inv_k, k, ...
-        epsilon, alpha, B, Em, G, D, model))/ 2 + ...
-        sum(sum(S/2 * (u(:) - u_old(:)).^2))*dx*dy;
+        (compute_En(2*u - u_old, 2*w - w_old, Para, dx, dy, inv_k, k, ...
+        Em, G, D, model))/ 2 + ...
+        sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*dx*dy;
     
     mass(end + 1) = sum(sum(u))*dx*dy/(Lx*Ly);
     
@@ -385,8 +335,6 @@ r_tilde = -(b*u + c*u_old) - S*real(ifftn(reshape(k .* u_snew(:), ...
 m_est = (alpha*epsilon^2)/(a*Lx*Ly) * sum(r_tilde(:)) * dx*dy;
 
 r_hat = r_tilde + m_est;
-% r_hat = r_tilde + (2*alpha*epsilon^2*dt)/(3*Lx*Ly) * sum(r_tilde(:)) * dx*dy;
-% r_hat = r_tilde + m;
 
 end
 
@@ -399,65 +347,21 @@ innprod_Hu = sum(sum(H_snew .* psi_r)) * dx*dy...
 
 end
 
-function E_n = compute_En(u, w, m, dx, dy, inv_k, k, e, a, B, Em, G, D, model)
+function E_n = compute_En(u, w, Para, dx, dy, inv_k, k, Em, G, D, model)
 
-% F = compute_F(u);
 
-e = e^2/2;
+e = Para.epsilon^2/2;
 
-um = fftn(u - m);
+um = fftn(u - Para.m);
 
 v = -inv_k .* um(:);
 v(spdiags(k) == 0) = 0;
 
 u = fftn(u);
 
-% E_n = sum(sum(e * real(ifftn(-1i*k.*u(:))).^2 + ...
-%     a*e * real(ifftn(-1i*k.*v)).^2 + F(:)))*dx*dy;
-
 E_n = sum(sum(e * real(ifftn(D.*u(:))).^2 + ...
-    a*e * real(ifftn(D.*v)).^2))*dx*dy + ...
-    w^2 - B;
-
-% E_n = sum(sum(e * real(ifftn(-1i*k.*u(:))).^2 + ...
-%     a*e * real(ifftn(-1i*k.*v)).^2))*dx*dy + ...
-%     w^2 - B - Em;
-
-end
-
-function En_SSAV = compute_En_SSAV(u, u_old, w, w_old, m, dx, dy, inv_k,...
-    k, e, a, B, En, Em, S)
-
-e = e^2/2;
-
-um = fftn(u - m);
-um_old = fftn(u_old - m);
-
-v = -inv_k .* um(:);
-v(spdiags(k) == 0) = 0;
-
-v_old = -inv_k .* um_old(:);
-v_old(spdiags(k) == 0) = 0;
-
-u2 = fftn(u);
-u2_old = fftn(u_old);
-
-En_SSAV = (En) / 2 + sum(sum(e/2 * (2*real(ifftn(-1i*k.*u2(:))) - ...
-    real(ifftn(-1i*k.*u2_old(:)))).^2 + ...
-    a*e/2 * (2*real(ifftn(-1i*k.*v)) -real(ifftn(-1i*k.*v_old)) ).^2 + ...
-    S/2 * (u(:) - u_old(:)).^2))*dx*dy + ...
-    0.5*(2*w - w_old)^2 - B;
-
-% En_SSAV = sum(sum(e/2 * ((real(ifftn(-1i*k.*u2(:)))).^2 + (2*real(ifftn(-1i*k.*u2(:))) - ...
-%     real(ifftn(-1i*k.*u2_old(:)))).^2) + ...
-%     a*e/2 * ((real(ifftn(-1i*k.*v)).^2 +(2*real(ifftn(-1i*k.*v)) -...
-%     real(ifftn(-1i*k.*v_old)) ).^2)) + S/2 *((u(:) - u_old(:)).^2)))*dx*dy...
-%     + 0.5*(w^2 + (2*w - w_old)^2);
-%
-% En_SSAV = sum(sum(e/2 * ((real(ifftn(-1i*k.*u2(:)))).^2 + (2*real(ifftn(-1i*k.*u2(:))) - ...
-%     real(ifftn(-1i*k.*u2_old(:)))).^2) + ...
-%     a*e/2 * ((real(ifftn(-1i*k.*v)).^2 +(2*real(ifftn(-1i*k.*v)) -...
-%     real(ifftn(-1i*k.*v_old)) ).^2))))*dx*dy;
+    Para.alpha*e * real(ifftn(D.*v)).^2))*dx*dy + ...
+    w^2 - Para.B;
 
 end
 
@@ -474,25 +378,22 @@ c = gamma^2 / (1 + gamma);                  c = c / dt_new;
 
 end
 
-function P = defn_P(a, dt, S, k, alpha, epsilon, nx, ny, G, D, model)
-
-% P = spdiags(a + alpha*epsilon^2 + S*k.^2 + epsilon^2*k.^4, ...
-%     0, nx*ny, nx*ny);
-
-% define P for BDF2
-if model == 3
-    
-    P = spdiags(a + alpha*epsilon^2 - S*G - epsilon^2*G.*D.^2, ...
-        0, nx*ny, nx*ny);
-
-else
-
-    P = spdiags(a + alpha*epsilon^2 - S*G + epsilon^2*G.*D.^2, ...
-        0, nx*ny, nx*ny);
-
-end
-
-end
+% function P = defn_P(a, dt, S, k, alpha, epsilon, nx, ny, G, D, model)
+% 
+% % define P for BDF2
+% if model == 3
+% 
+%     P = spdiags(a + alpha*epsilon^2 - S*G - epsilon^2*G.*D.^2, ...
+%         0, nx*ny, nx*ny);
+% 
+% else
+% 
+%     P = spdiags(a + alpha*epsilon^2 - S*G + epsilon^2*G.*D.^2, ...
+%         0, nx*ny, nx*ny);
+% 
+% end
+% 
+% end
 
 function u_p = AM3_up(u_new, u, u_old, epsilon, alpha, gamma, k, ...
     dt_new, m, nx, ny, beta)
@@ -532,28 +433,31 @@ A_dp = rho_s * dt * (err_tol / err) ^ (1/3);
 end
 
 function [u_new, w_new, m_est, gamma] = compute_unew(u, u_old, w, w_old,...
-    dx, dy, dt, dt_new, Lx, Ly, nx, ny, k, S, B, alpha, epsilon, G, D,...
-    model, beta)
+    dx, dy, dt, dt_new, Lx, Ly, nx, ny, k, Para, G, D,...
+    model, P1)
 
 u_snew = compute_u_snew(u, u_old);
     
-F = compute_F(u_snew, beta);
-f = compute_f(u_snew, beta);
+F = compute_F(u_snew, Para.beta);
+f = compute_f(u_snew, Para.beta);
 
 int_F = sum(F(:)) * dx*dy;
 
 %w(u^{*,n+1})
-w_snew = compute_w(int_F, B);
+w_snew = compute_w(int_F, Para.B);
 
 % H^{*,n+1}
 H_snew = compute_H(f, w_snew);
 
 [a, b, c, gamma] =  compute_dt_coeffs(dt_new, dt);
 
-[r, r_hat, m_est] = compute_r(u_snew, u, u_old, w, w_old, H_snew, S, ...
-    dx, dy, dt_new, k, Lx, Ly, nx, ny, alpha, epsilon, a, b, c);
+[r, r_hat, m_est] = compute_r(u_snew, u, u_old, w, w_old, H_snew, Para.S, ...
+    dx, dy, dt_new, k, Lx, Ly, nx, ny, Para.alpha, Para.epsilon, a, b, c);
 
-P = defn_P(a, dt_new, S, k, alpha, epsilon, nx, ny, G, D, model);
+% P = defn_P(a, dt_new, S, k, alpha, epsilon, nx, ny, G, D, model);
+
+% define P for BDF2    
+P = spdiags(a + P1, 0, nx*ny, nx*ny);
 
 r_hat = fftn(r_hat);
 H2 = fftn(H_snew);
