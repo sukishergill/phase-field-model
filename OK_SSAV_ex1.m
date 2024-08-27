@@ -8,9 +8,26 @@ Para.S = 2;          % positive stabilizing parameter S ~ ||f(u)||_\infty
 Para.rho_s = 0.9;    % safety coeff
 
 
-Lx = 2*pi;                              Ly = 2*pi;
-nx = 256;                               ny = 256;                    
-x = Lx*(1:nx)' / nx - Lx/2;             y = Ly*(1:ny)' / ny - Ly/2;
+Grid.Lx = 2*pi;                              Grid.Ly = 2*pi;
+Grid.Nx = 256;                               Grid.Ny = 256;     
+
+Grid.dx = Grid.Lx/Grid.Nx;      Grid.dy = Grid.Ly/Grid.Ny;
+
+x = Grid.Lx*(1:Grid.Nx)' / Grid.Nx - Grid.Lx/2;             
+y = Grid.Ly*(1:Grid.Ny)' / Grid.Ny - Grid.Ly/2;
+
+[xx,yy] = meshgrid(x,y);
+
+kx = [ 0:nx/2-1, 0.0, -nx/2+1:-1]' / (Lx/pi/2);
+ky = [ 0:ny/2-1, 0.0, -ny/2+1:-1]' / (Ly/pi/2);
+
+[kkx,kky] = meshgrid(kx, ky);
+Grid.k = sqrt(kkx.^2 + kky.^2);
+Grid.k = k(:);
+
+Grid.inv_k = 1./(k.^2);      Grid.inv_k(k == 0) = 1;
+
+
 dt = 0.001;
 tf = 5;
 
@@ -21,15 +38,14 @@ tf = 5;
 t_vals = linspace(dt, tf, round(tf / dt));
 
 
-[xx,yy] = meshgrid(x,y);
 
 
 % Initial condition
 u = Para.m + 0.001*rand(nx, ny);
 
 
-[k, tt, uu, Eu, Eu_SSAV, Em, mass, m_est_vals, t_vals, dt_vals] = ...
-    SSAV_2D( nx, ny, Lx, Ly, dt, tf, Para, u, 1);
+[tt, uu, Eu, Eu_SSAV, Em, mass, m_est_vals, t_vals, dt_vals] = ...
+    SSAV_2D(Grid, dt, tf, Para, u, 1);
 
 
 figure(1)
