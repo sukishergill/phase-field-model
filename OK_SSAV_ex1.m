@@ -1,3 +1,5 @@
+clear all;
+
 Para.alpha = 250000;
 Para.beta = 1;
 Para.epsilon = 0.02;
@@ -18,34 +20,32 @@ y = Grid.Ly*(1:Grid.Ny)' / Grid.Ny - Grid.Ly/2;
 
 [xx,yy] = meshgrid(x,y);
 
-kx = [ 0:nx/2-1, 0.0, -nx/2+1:-1]' / (Lx/pi/2);
-ky = [ 0:ny/2-1, 0.0, -ny/2+1:-1]' / (Ly/pi/2);
+kx = [ 0:Grid.Nx/2-1, 0.0, -Grid.Nx/2+1:-1]' / (Grid.Lx/pi/2);
+ky = [ 0:Grid.Ny/2-1, 0.0, -Grid.Ny/2+1:-1]' / (Grid.Ly/pi/2);
 
 [kkx,kky] = meshgrid(kx, ky);
-Grid.k = sqrt(kkx.^2 + kky.^2);
+k = sqrt(kkx.^2 + kky.^2);
 Grid.k = k(:);
 
-Grid.inv_k = 1./(k.^2);      Grid.inv_k(k == 0) = 1;
+Grid.inv_k = 1./(Grid.k.^2);      Grid.inv_k(k == 0) = 1;
 
 
-dt = 0.001;
+dt_min = 0.001;
+dt_max = 0.001;
 tf = 5;
 
 
-dt = 0.001;
-tf = 5;
-
-t_vals = linspace(dt, tf, round(tf / dt));
+% t_vals = linspace(dt, tf, round(tf / dt));
 
 
 
 
 % Initial condition
-u = Para.m + 0.001*rand(nx, ny);
+u = Para.m + 0.001*rand(Grid.Nx, Grid.Ny);
 
 
 [tt, uu, Eu, Eu_SSAV, Em, mass, m_est_vals, t_vals, dt_vals] = ...
-    SSAV_2D(Grid, dt, tf, Para, u, 1);
+    SSAV_2D(Grid, dt_min, dt_max, tf, Para, u, 1);
 
 
 figure(1)
