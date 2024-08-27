@@ -1,4 +1,4 @@
-clear all; clc;
+clear all;
 
 Para.alpha = 0;
 Para.beta = 0.02;
@@ -29,11 +29,11 @@ Grid.k = k(:);
 
 Grid.inv_k = 1./(Grid.k.^2);      Grid.inv_k(k == 0) = 1;
 
-
-dt = 0.5;
+dt_max = 0.5;
+dt_min = 0.5;
 tf = 5000;
 
-t_vals = linspace(dt, tf, round(tf / dt));
+% t_vals = linspace(dt, tf, round(tf / dt));
 
 
 
@@ -44,7 +44,7 @@ u = Para.m + u - mean(u(:));
 
 
 [tt, uu, Eu, Eu_SSAV, Em, mass, m_est_vals, t_vals, dt_vals] = ...
-    SSAV_2D(Grid, dt, tf, Para, u, 3);
+    SSAV_2D(Grid, dt_min, dt_max, tf, Para, u, 3);
 
 
 figure(1)
