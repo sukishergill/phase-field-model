@@ -1,5 +1,5 @@
 function [tt, uu, Eu, Eu_SSAV, Em, mass, m_est_vals, t_vals, dt_vals] = ...
-    SSAV_2D (Grid, dt, tmax, Para, u, model)
+    SSAV_2D (Grid, dt_min, dt_max, tmax, Para, u, model)
 
 
 % B = 1;          % const. that ensures positive radicand
@@ -7,9 +7,6 @@ function [tt, uu, Eu, Eu_SSAV, Em, mass, m_est_vals, t_vals, dt_vals] = ...
 
 err_tol = 10E-5;        % error tolerance
 rho_s = 0.9;            % safety coeff 
-
-dt_min = 0.5;        % min time step
-dt_max = 0.5;          % max time step
 
 dt = dt_max;
 
