@@ -8,8 +8,8 @@ function [tt, uu, Eu, Eu_SSAV, Em, mass, m_est_vals, t_vals, dt_vals] = ...
 err_tol = 10E-5;        % error tolerance
 rho_s = 0.9;            % safety coeff 
 
-dt_min = 0.001;        % min time step
-dt_max = 0.01;          % max time step
+dt_min = 0.5;        % min time step
+dt_max = 0.5;          % max time step
 
 dt = dt_max;
 
@@ -105,7 +105,7 @@ if model == 3
     % P = spdiags(1/dt + alpha*epsilon^2 - S*G - epsilon^2*G.*D.^2, ...
     %     0, nx*ny, nx*ny);
 
-    P1 = alpha*epsilon^2 - Para.S*G - Para.epsilon^2*G.*D.^2;
+    P1 = Para.alpha*Para.epsilon^2 - Para.S*G - Para.epsilon^2*G.*D.^2;
 
 else
     % P = spdiags(1/dt + alpha*epsilon^2 - S*G + epsilon^2*G.*D.^2, ...
