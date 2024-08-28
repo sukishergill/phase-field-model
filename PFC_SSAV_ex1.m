@@ -1,4 +1,12 @@
+% Phase-field crystal example 1
+
 clear all;
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%% Model set up %%%%%%%%%%%%%%%%%% 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+model = 2;
 
 Para.alpha = 0;
 Para.beta = 0.02;
@@ -7,12 +15,11 @@ Para.m = 0.06;
 Para.M = 1;
 Para.B = 1;          % const. that ensures positive radicand
 Para.S = 2;          % positive stabilizing parameter S ~ ||f(u)||_\infty
-Para.rho_s = 0.9;    % safety coeff
 
-
-Grid.Lx = 32*pi;                              Grid.Ly = 32*pi;
-Grid.Nx = 256;                               Grid.Ny = 256;     
-
+% spatial discretization
+Grid.Lx = 32*pi;        Grid.Ly = 32*pi;         % domain size
+Grid.Nx = 256;          Grid.Ny = 256;           % # of grid points
+     
 Grid.dx = Grid.Lx/Grid.Nx;      Grid.dy = Grid.Ly/Grid.Ny;
 
 x = Grid.Lx*(1:Grid.Nx)' / Grid.Nx - Grid.Lx/2;             
@@ -20,33 +27,31 @@ y = Grid.Ly*(1:Grid.Ny)' / Grid.Ny - Grid.Ly/2;
 
 [xx,yy] = meshgrid(x,y);
 
+% spectral discretization
 kx = [ 0:Grid.Nx/2-1, 0.0, -Grid.Nx/2+1:-1]' / (Grid.Lx/pi/2);
 ky = [ 0:Grid.Ny/2-1, 0.0, -Grid.Ny/2+1:-1]' / (Grid.Ly/pi/2);
-
 [kkx,kky] = meshgrid(kx, ky);
 k = sqrt(kkx.^2 + kky.^2);
 Grid.k = k(:);
-
 Grid.inv_k = 1./(Grid.k.^2);      Grid.inv_k(k == 0) = 1;
 
-dt_max = 0.5;
-dt_min = 0.5;
-tf = 5000;
-
-% t_vals = linspace(dt, tf, round(tf / dt));
-
-
-
+% time discretization
+% if dt_min = dt_max BDF2 will be implemented, otherwise an adaptive time
+% stepping scheme will be used
+Time.dt_max = 0.5;        % minimum time step
+Time.dt_min = 0.5;        % maximum time step
+Time.tf = 5000;
 
 % Initial condition
 u = 0.2*rand(Grid.Nx,Grid.Ny);
 u = Para.m + u - mean(u(:));
 
-
 [tt, uu, Eu, Eu_SSAV, Em, mass, m_est_vals, t_vals, dt_vals] = ...
-    SSAV_2D(Grid, dt_min, dt_max, tf, Para, u, 3);
+    SSAV_2D(Grid, Time, Para, u, model);
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%% Plotting %%%%%%%%%%%%%%%%%%%% 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 figure(1)
 plot(tt, Eu - Em, 'Linewidth', 4)
 set(gca, 'Fontsize', 40)
