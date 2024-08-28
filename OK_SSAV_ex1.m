@@ -1,17 +1,26 @@
+% Ohta-Kawasaki example 1
+
 clear all;
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%% Model set up %%%%%%%%%%%%%%%%%% 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+model = 1;
+
+% model parameters
 Para.alpha = 250000;
 Para.beta = 1;
 Para.epsilon = 0.02;
-Para.m = 0;
+Para.m = 0.3;
 Para.M = 1;
 Para.B = 1;          % const. that ensures positive radicand
 Para.S = 2;          % positive stabilizing parameter S ~ ||f(u)||_\infty
-Para.rho_s = 0.9;    % safety coeff
 
 
-Grid.Lx = 2*pi;                              Grid.Ly = 2*pi;
-Grid.Nx = 256;                               Grid.Ny = 256;     
+% spatial discretization
+Grid.Lx = 2*pi;             Grid.Ly = 2*pi;         % domain size
+Grid.Nx = 256;              Grid.Ny = 256;          % # of grid points
 
 Grid.dx = Grid.Lx/Grid.Nx;      Grid.dy = Grid.Ly/Grid.Ny;
 
@@ -20,33 +29,30 @@ y = Grid.Ly*(1:Grid.Ny)' / Grid.Ny - Grid.Ly/2;
 
 [xx,yy] = meshgrid(x,y);
 
+% spectral discretization
 kx = [ 0:Grid.Nx/2-1, 0.0, -Grid.Nx/2+1:-1]' / (Grid.Lx/pi/2);
 ky = [ 0:Grid.Ny/2-1, 0.0, -Grid.Ny/2+1:-1]' / (Grid.Ly/pi/2);
-
 [kkx,kky] = meshgrid(kx, ky);
 k = sqrt(kkx.^2 + kky.^2);
 Grid.k = k(:);
-
 Grid.inv_k = 1./(Grid.k.^2);      Grid.inv_k(k == 0) = 1;
 
-
-dt_min = 0.001;
-dt_max = 0.001;
-tf = 5;
-
-
-% t_vals = linspace(dt, tf, round(tf / dt));
-
-
-
+% time discretization
+% if dt_min = dt_max BDF2 will be implemented, otherwise an adaptive time
+% stepping scheme will be used
+Time.dt_min = 0.001;        % minimum time step
+Time.dt_max = 0.001;        % maximum time step
+Time.tf = 5;
 
 % Initial condition
 u = Para.m + 0.001*rand(Grid.Nx, Grid.Ny);
 
-
 [tt, uu, Eu, Eu_SSAV, Em, mass, m_est_vals, t_vals, dt_vals] = ...
-    SSAV_2D(Grid, dt_min, dt_max, tf, Para, u, 1);
+    SSAV_2D(Grid, Time, Para, u, model);
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%% Plotting %%%%%%%%%%%%%%%%%%%% 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 figure(1)
 plot(tt, Eu - Em, 'Linewidth', 4)
@@ -61,8 +67,6 @@ subplot(2,2,1)
 surf(x,y,uu{26}), shading interp, lighting phong, axis equal,axis off;
 view([-90 90]);
 title(['t = ', num2str(tt(26))], 'Interpreter', 'latex')
-% c = colorbar;
-% set(c, 'TickLabelInterpreter','latex')
 caxis([-1 , 1])
 set(gca, 'Fontsize', 40)
 set(gca,'TickLabelInterpreter','latex')
@@ -70,8 +74,6 @@ subplot(2,2,2)
 surf(x,y,uu{51}), shading interp, lighting phong, axis equal,axis off;
 view([-90 90]);
 title(['t = ', num2str(tt(51))], 'Interpreter', 'latex')
-% c = colorbar;
-% set(c, 'TickLabelInterpreter','latex')
 caxis([-1 , 1])
 set(gca, 'Fontsize', 40)
 set(gca,'TickLabelInterpreter','latex')
@@ -79,8 +81,6 @@ subplot(2,2,3)
 surf(x,y,uu{76}), shading interp, lighting phong, axis equal,axis off;
 view([-90 90]);
 title(['t = ', num2str(tt(76))], 'Interpreter', 'latex')
-% c = colorbar;
-% set(c, 'TickLabelInterpreter','latex')
 caxis([-1 , 1])
 set(gca, 'Fontsize', 40)
 set(gca,'TickLabelInterpreter','latex')
