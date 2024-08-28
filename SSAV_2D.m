@@ -1,32 +1,45 @@
 function [tt, uu, Eu, Eu_SSAV, Em, mass, m_est_vals, t_vals, dt_vals] = ...
-    SSAV_2D (Grid, dt_min, dt_max, tmax, Para, u, model)
+    SSAV_2D (Grid, Time, Para, u, model)
 
-
-% B = 1;          % const. that ensures positive radicand
-% S = 2;          % positive stabilizing parameter S ~ ||f(u)||_\infty
+% This function solves the following PDE
+%
+%           u_t = G(-epsilon*Du + f(u) + alpha*epsilon v)
+%
+% where f(u) = u^3 - beta * u
+%
+% We implemented the stabilized scalar auxiliary variable (SSAV) method.
+%
+% We use BDF2 or adaptive time stepping scheme for the time
+% discretization and Fourier method for the spatial discretization.
+%
+% References:
+%
+%           "The scalar auxiliary variable (SAV) approach for gradient
+%           flows"
+%           Jie Shen, Jie Xu and Jiang Yang
+%
+%           "Efficient and energy stable method for the Cahn-Hilliard
+%           phase-field model for diblock copolymers"
+%           Jun Zhang, Chuanjun Chen and Xiaofeng Yang
+%
+%           "Benchmark computation of morphological complexity in the
+%           functionalized Cahn-Hilliard gradient flow"
+%           Andrew Christlieb, Keith Promislow, Zengqiang Tan, Sulin Wang,
+%           Brian Wetton, and Steven M. Wise
+% 
+%
+% The input variable will indicate which eqn to solve
+%           1. Ohta-Kawasaki or Cahn-Hilliard
+%           2. Phase-field-crystals
+%           3. Allen-Cahn
 
 err_tol = 10E-5;        % error tolerance
 rho_s = 0.9;            % safety coeff 
 
-dt = dt_max;
-
-% spatial grid
-% dx = Lx/nx;                         dy = Ly/ny;
-% x = Lx*(1:nx)' / nx - Lx/2;         y = Ly*(1:ny)' / ny - Ly/2;      
-% 
-% [xx, yy] = meshgrid(x, y);
-% 
-% kx = [ 0:nx/2-1, 0.0, -nx/2+1:-1]' / (Lx/pi/2);
-% ky = [ 0:ny/2-1, 0.0, -ny/2+1:-1]' / (Ly/pi/2);
-% 
-% [kkx,kky] = meshgrid(kx, ky);
-% k = sqrt(kkx.^2 + kky.^2);
-% k = k(:);
-% 
-% inv_k = 1./(k.^2);      inv_k(k == 0) = 1;
+dt = Time.dt_max;
 
 
-if model == 3
+if model == 2
 
     D = (-Grid.k.^2 + 1);    % PFC
     
@@ -36,7 +49,7 @@ else
 end
 
 % For all 3 models the operator G is the same
-if model == 4
+if model == 3
     
     G = -1;             % AC
     
@@ -48,8 +61,7 @@ end
 v = fftn(u);
 
 % define number of time steps and time steps for plotting purposes
-nmax = round(tmax / dt_max);
-nplt = floor( (tmax / 100) / dt_max);
+nplt = floor( (Time.tf / 100) / Time.dt_max);
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%% Compute u^1 using backward Euler %%%%%%%% 
@@ -81,14 +93,16 @@ Em = sum(sum((compute_F(Para.m*ones(size(u)), Para.beta))))*Grid.dx*Grid.dy;
 Eu = zeros(1, 101);
 Eu_SSAV = zeros(1,100);
 
-Eu(1) = compute_En(u, w_old, Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k, Em, G, D, model);
+Eu(1) = compute_En(u, w_old, Para, Grid.dx, Grid.dy, Grid.inv_k,...
+    Grid.k, Em, G, D, model);
 
 H = compute_H(f, w_old);
 
 r = -0.5 * sum(sum(H.*u)) * Grid.dx*Grid.dy + w_old;
 H2 = fftn(H);
-r_tilde = u/dt - Para.S*real(ifftn(reshape(-Grid.k.^2 .* v(:),Grid.Nx,Grid.Ny))) - ...
-    r*real(ifftn(reshape(-Grid.k.^2 .* H2(:),Grid.Nx,Grid.Ny)));
+
+r_tilde = u/dt - Para.S*real(ifftn(reshape(G .* v(:),Grid.Nx,Grid.Ny))) - ...
+    r*real(ifftn(reshape(G .* H2(:),Grid.Nx,Grid.Ny)));
 
 r_hat = (Para.alpha*Para.epsilon^2*dt)/(Grid.Lx*Grid.Ly) * ...
     sum(r_tilde(:))*Grid.dx*Grid.dy + r_tilde;
@@ -98,15 +112,11 @@ m_est_vals(1) = (Para.alpha*Para.epsilon^2*dt)/(Grid.Lx*Grid.Ly) * ...
     sum(r_tilde(:))*Grid.dx*Grid.dy;
 
 
-if model == 3
-    % P = spdiags(1/dt + alpha*epsilon^2 - S*G - epsilon^2*G.*D.^2, ...
-    %     0, nx*ny, nx*ny);
+if model == 2
 
     P1 = Para.alpha*Para.epsilon^2 - Para.S*G - Para.epsilon^2*G.*D.^2;
 
 else
-    % P = spdiags(1/dt + alpha*epsilon^2 - S*G + epsilon^2*G.*D.^2, ...
-    %     0, nx*ny, nx*ny);
 
     P1 = Para.alpha*Para.epsilon^2 - Para.S*G + Para.epsilon^2*G.*D.^2;
 
@@ -117,8 +127,8 @@ P = spdiags(1/dt + P1, 0, Grid.Nx*Grid.Ny, Grid.Nx*Grid.Ny);
 r_hat = fftn(r_hat);
 psi_r = P \ r_hat(:);
 psi_r = real(ifftn(reshape(psi_r, Grid.Nx, Grid.Ny)));
-
-psi_H = P \ (-Grid.k.^2 .* H2(:));         
+  
+psi_H = P \ (G .* H2(:)); 
 psi_H = real(ifftn(reshape(psi_H, Grid.Nx, Grid.Ny)));
 
 innprod_Hu = compute_ip(H, psi_r, psi_H, Grid.dx, Grid.dy);
@@ -163,7 +173,7 @@ end
 j = 1;
 
 
-while t < tmax
+while t <= Time.tf
 
 
     j = j + 1;
@@ -189,9 +199,9 @@ while t < tmax
     rel_err = (sqrt(sum(sum((u_new - u_p).^2)) / (Grid.Nx*Grid.Ny))) / ...
         (sqrt(sum(sum(u_p.^2)) / (Grid.Nx*Grid.Ny)));
 
-    A_dp = compute_A_dp(Para.rho_s, err_tol, rel_err, dt_new);
+    A_dp = compute_A_dp(rho_s, err_tol, rel_err, dt_new);
 
-    if ((rel_err < err_tol) || (dt_new == dt_min))
+    if ((rel_err < err_tol) || (dt_new == Time.dt_min))
 
         % If the error is < the error tolerance or dt is the min dt then we
         % accept the primary approx
@@ -199,7 +209,7 @@ while t < tmax
         u_old = u;                      u = u_new;
 
         % update dt and current time
-        dt_new = max(dt_min, min(A_dp, dt_max));
+        dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
         t = t + dt_new;
         dt = dt_new;
 
@@ -207,9 +217,9 @@ while t < tmax
         % if the above isn't satisfied we will need to recompute dt, the
         % primary approx and the errors.
 
-        while ((rel_err > err_tol) && (dt_new ~= dt_min))
+        while ((rel_err > err_tol) && (Time.dt_new ~= Time.dt_min))
 
-           dt_new = max(dt_min, min(A_dp, dt_max));
+           dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
 
            [u_new, w_new, m_est, gamma] = compute_unew(u, u_old, w, ... 
                w_old, Grid, dt, dt_new, Para, ...
@@ -223,7 +233,7 @@ while t < tmax
            rel_err = (sqrt(sum(sum((u_new - u_p).^2)) / (Grid.Nx*Grid.Ny))) / ...
                (sqrt(sum(sum(u_p.^2)) / (Grid.Nx*Grid.Ny)));
 
-           A_dp = compute_A_dp(Para.rho_s, err_tol, rel_err, dt_new);
+           A_dp = compute_A_dp(rho_s, err_tol, rel_err, dt_new);
            
 
         end
@@ -287,7 +297,6 @@ Eu_SSAV = Eu_SSAV ./ (Grid.Lx*Grid.Ly);
 end
 
 
-% the 3 func below could instead be defined as a func handle
 function u_snew = compute_u_snew(u, u_old)
 
 u_snew = 2*u - u_old;
@@ -319,9 +328,7 @@ H = f / w;
 end
 
 function [r, r_hat, m_est] = compute_r(u_snew, u, u_old, w, w_old, ... 
-    H_snew, S, Grid, dt, alpha, epsilon, a, b, c)
-
-k = -Grid.k.^2;
+    H_snew, S, Grid, dt, alpha, epsilon, a, b, c, G)
 
 r = -(b*w + c*w_old)/a + 0.5 * sum(sum((H_snew .* (b*u + c*u_old)/a)))...
     * Grid.dx*Grid.dy;
@@ -329,9 +336,9 @@ r = -(b*w + c*w_old)/a + 0.5 * sum(sum((H_snew .* (b*u + c*u_old)/a)))...
 rH = fftn(r .* H_snew);
 u_snew = fftn(u_snew);
 
-r_tilde = -(b*u + c*u_old) - S*real(ifftn(reshape(k .* u_snew(:), ...
+r_tilde = -(b*u + c*u_old) - S*real(ifftn(reshape(G .* u_snew(:), ...
     Grid.Nx, Grid.Ny))) + ...
-    real(ifftn( reshape(k .* rH(:), Grid.Nx, Grid.Ny)));
+    real(ifftn( reshape(G .* rH(:), Grid.Nx, Grid.Ny)));
 
 m_est = (alpha*epsilon^2)/(a*Grid.Lx*Grid.Ly) * ...
     sum(r_tilde(:)) * Grid.dx*Grid.dy;
@@ -351,7 +358,6 @@ end
 
 function E_n = compute_En(u, w, Para, dx, dy, inv_k, k, Em, G, D, model)
 
-
 e = Para.epsilon^2/2;
 
 um = fftn(u - Para.m);
@@ -370,7 +376,6 @@ end
 function [a, b, c, gamma] = compute_dt_coeffs(dt, dt_new)
 
 gamma = dt_new / dt;
-% gamma = 1;
 
 a = (1 + 2*gamma) / (1 + gamma);            a = a / dt_new;
 
@@ -380,22 +385,6 @@ c = gamma^2 / (1 + gamma);                  c = c / dt_new;
 
 end
 
-% function P = defn_P(a, dt, S, k, alpha, epsilon, nx, ny, G, D, model)
-% 
-% % define P for BDF2
-% if model == 3
-% 
-%     P = spdiags(a + alpha*epsilon^2 - S*G - epsilon^2*G.*D.^2, ...
-%         0, nx*ny, nx*ny);
-% 
-% else
-% 
-%     P = spdiags(a + alpha*epsilon^2 - S*G + epsilon^2*G.*D.^2, ...
-%         0, nx*ny, nx*ny);
-% 
-% end
-% 
-% end
 
 function u_p = AM3_up(u_new, u, u_old, epsilon, alpha, gamma, k, ...
     dt_new, m, Nx, Ny, beta)
@@ -435,8 +424,7 @@ A_dp = rho_s * dt * (err_tol / err) ^ (1/3);
 end
 
 function [u_new, w_new, m_est, gamma] = compute_unew(u, u_old, w, w_old,...
-    Grid, dt, dt_new, Para, G, D,...
-    model, P1)
+    Grid, dt, dt_new, Para, G, D, model, P1)
 
 u_snew = compute_u_snew(u, u_old);
     
@@ -454,18 +442,17 @@ H_snew = compute_H(f, w_snew);
 [a, b, c, gamma] =  compute_dt_coeffs(dt_new, dt);
 
 [r, r_hat, m_est] = compute_r(u_snew, u, u_old, w, w_old, H_snew, Para.S, ...
-    Grid, dt_new, Para.alpha, Para.epsilon, a, b, c);
-
-% P = defn_P(a, dt_new, S, k, alpha, epsilon, nx, ny, G, D, model);
+    Grid, dt_new, Para.alpha, Para.epsilon, a, b, c, G);
 
 % define P for BDF2    
 P = spdiags(a + P1, 0, Grid.Nx*Grid.Ny, Grid.Nx*Grid.Ny);
 
 r_hat = fftn(r_hat);
-H2 = fftn(H_snew);
 psi_r = P \ r_hat(:);           psi_r = reshape(psi_r, Grid.Nx, Grid.Ny);
 psi_r = real(ifftn(psi_r));
-psi_H = P \ (-Grid.k.^2.*H2(:));     psi_H = reshape(psi_H, Grid.Nx, Grid.Ny);
+
+H2 = fftn(H_snew);
+psi_H = P \ (G.*H2(:));     psi_H = reshape(psi_H, Grid.Nx, Grid.Ny);
 psi_H = real(ifftn(psi_H));
 
 innprod_Hu = compute_ip(H_snew, psi_r, psi_H, Grid.dx, Grid.dy);
