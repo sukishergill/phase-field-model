@@ -94,4 +94,4 @@ set(c, 'Position', [0.9 0.168 0.022 0.7]);
 caxis([-1 , 1])
 set(gca, 'Fontsize', 40)
 set(gca,'TickLabelInterpreter','latex')
-colormap('gray')
+colormap('gray')plot_SSAV
