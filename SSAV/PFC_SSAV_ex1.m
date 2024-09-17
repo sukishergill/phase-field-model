@@ -38,15 +38,16 @@ Grid.inv_k = 1./(Grid.k.^2);      Grid.inv_k(k == 0) = 1;
 % time discretization
 % if dt_min = dt_max BDF2 will be implemented, otherwise an adaptive time
 % stepping scheme will be used
-Time.dt_max = 0.5;        % minimum time step
-Time.dt_min = 0.5;        % maximum time step
-Time.tf = 5000;
+Time.dt_max = 1;        % minimum time step
+Time.dt_min = 1;        % maximum time step
+Time.tf = 1000;
 
 % Initial condition
 u = 0.2*rand(Grid.Nx,Grid.Ny);
 u = Para.m + u - mean(u(:));
 
-[tt, uu, Eu, Eu_SSAV, Em, mass, m_est_vals, t_vals, dt_vals] = ...
+[u, Eu, Em, mass, m_est_vals, t_vals, dt_vals] = ...
     SSAV_2D(Grid, Time, Para, u, model);
 
-plot_SSAV
+% plot_SSAV
+% plot_err
