@@ -33,8 +33,7 @@ function [u, Eu, Em, mass, m_est_vals, t_vals, dt_vals]...
 %           2. Phase-field-crystals
 %           3. Allen-Cahn
 
-err_tol = 1E-3;        % error tolerance
-sigma = 1E-5;             
+err_tol = 1E-5;        % error tolerance
 
 dt = Time.dt_min;
 
@@ -64,16 +63,6 @@ v = fftn(u);
 nplt = floor( (Time.tf / 100) / Time.dt_min);
 nmax = round(Time.tf / Time.dt_min);
 
-% if Time.dt_max == Time.dt_min
-%     ut = zeros(1, nmax - 2);
-%     Et = ut;
-%     Ett = ut;
-%     t_vals = ut;
-% 
-% else
-%     ut = 0;     Et = 0;     Ett = 0;     t_vals = 0;
-% 
-% end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%% Compute u^1 using backward Euler %%%%%%%% 
@@ -87,8 +76,6 @@ w_old = compute_w(int_F, Para.B);
 
 t = 0;
 
-% uu = cell(101,1);
-% uu{1} = u;
 
 mass = zeros(1, 101);
 mass(1) = (sum(u(:))*Grid.dx*Grid.dy)/(Grid.Lx*Grid.Ly);
@@ -97,9 +84,7 @@ m_est_vals = zeros(1, 100);
 
 Em = sum(sum((compute_F(Para.m*ones(size(u)), Para.beta))))*Grid.dx*Grid.dy;
 
-% Eu = zeros(1, 101);
 Eu = zeros(1, nmax);
-% Eu_SSAV = zeros(1,100);
 t_vals = zeros(1, nmax);
 
 Eu(1) = compute_En(u, w_old, Para, Grid.dx, Grid.dy, Grid.inv_k,...
@@ -152,36 +137,6 @@ dt_vals = dt;
 
 t = t + dt;
 
-% t_vals = [0; t];
-
-% if nplt == 1
-% 
-%     uu{2} = u;    
-% 
-%     tt(2) = dt;  
-% 
-%     w_vals(2) = w;
-% 
-%     % Eu(2) = compute_En(u, w, Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k, Em, G, D, model);    
-% 
-%     Eu_SSAV(1) = (Eu(2))/2 + (compute_En(2*u - u_old, 2*w - w_old, ...
-%         Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k, Em, G, D, model)) / 2 + ...
-%         sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*Grid.dx*Grid.dy;
-% 
-%     m_est_vals(1) = (Para.alpha*Para.epsilon^2*dt)/(Grid.Lx*Grid.Ly) * ...
-%         sum(r_tilde(:))*Grid.dx*Grid.dy;
-% 
-%     mass(2) = sum(sum(u))*Grid.dx*Grid.dy/(Grid.Lx*Grid.Ly);
-% 
-% end
-
-% if Time.dt_max == Time.dt_min
-%     E_new = compute_En(u, w, Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k, Em, G, D, model);  
-%     % ut(1) = sum(sum(((u - u_old) / dt)).^2) * Grid.dx * Grid.dy;
-%     % Et(1) = (E_new - Eu(1)) / dt;
-% 
-%     E_old = Eu(1);      E = E_new;
-% end
 
 Eu(2) = compute_En(u, w, Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k, Em, G, D, model);
 E_old = Eu(1);       E = Eu(2);       t_vals(2) = t;
@@ -201,13 +156,9 @@ while t < Time.tf
     
     t = t + dt_new;
 
-    % t_vals = [t_vals; t];
-
     [u_new, w_new, m_est, gamma] = compute_unew(u, u_old, w, w_old, ...
         Grid, dt, dt_new, Para, G, D,...
         model, P1);
-
-    % Eu(j + 1) = compute_En(u, w, Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k, Em, G, D, model);
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %%%%%%%%%%%%%%%%% Adaptive time stepping %%%%%%%%%%%%%%%%%
@@ -224,8 +175,10 @@ while t < Time.tf
 
     rel_err = 0.5*dt_new*abs(Et) + dt_new^2 * (Para.S/2 * ut + ...
         (Ett < 0)*abs(Ett));
+    rel_err = rel_err / abs(E_new);
 
-    adap = 2*sigma*abs(E/Et);
+    adap = 0.5*dt*(err_tol / rel_err);
+
 
     dt_new = max(Time.dt_min, min(adap, Time.dt_max));
 
@@ -248,103 +201,20 @@ while t < Time.tf
     
         rel_err = 0.5*dt_new*abs(Et) + dt_new^2 * (Para.S/2 * ut + ...
             (Ett < 0)*abs(Ett));
+        rel_err = rel_err / abs(E_new);
 
-        dt_new = 2*sigma*abs(E/Et);
+        adap = 0.5*dt*(err_tol / rel_err);
 
         dt_new = max(Time.dt_min, min(adap, Time.dt_max));
     end
 
     % compute new time step
     dt = dt_new;
-    
-    %  if Time.dt_max == Time.dt_min
-    % 
-    %     % E_new = compute_En(u_new, w_new, Para, Grid.dx, Grid.dy,...
-    %     %     Grid.inv_k, Grid.k, Em, G, D, model);
-    %     E_new = Eu(j + 1);
-    % 
-    % 
-    %     if j ~= (nmax + 1)
-    % 
-    %         ut(j - 1) = sum(sum(((u_new - u_old) / (2*dt)).^2))*...
-    %             Grid.dx * Grid.dy;
-    % 
-    %         Et(j - 1) = (E_new -  E_old) / (2*dt);
-    % 
-    %         Ett(j - 1) = (E_new - 2*E + E_old) / (dt^2);
-    % 
-    %         E_old = E;      E = E_new;
-    % 
-    %         t_vals(j - 1) = t;
-    % 
-    %     % else
-    %     % 
-    %     %     ut(j) = sum(sum(((u_new - u) / dt ).^2)) * Grid.dx * Grid.dy;
-    %     % 
-    %     %     Et(j) = (E_new - E) / dt;
-    % 
-    %     end
-    % 
-    %     % w_old = w;                      w = w_new;
-    %     % u_old = u;                      u = u_new;
-    % 
-    % 
-    % else
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %%%%%%%%%%%%%%%%% Adaptive time stepping %%%%%%%%%%%%%%%%%
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-    % calculate the relative error approx
-    % rel_err = (sqrt(sum(sum((u_new - u_p).^2)) / (Grid.Nx*Grid.Ny))) / ...
-    %     (sqrt(sum(sum(u_p.^2)) / (Grid.Nx*Grid.Ny)));
-    % 
-    % A_dp = compute_A_dp(rho_s, err_tol, rel_err, dt_new);
-    % 
-    % if ((rel_err < err_tol) || (dt_new == Time.dt_min))
-    % 
-    %     % If the error is < the error tolerance or dt is the min dt then we
-    %     % accept the primary approx
-    %     w_old = w;                      w = w_new;
-    %     u_old = u;                      u = u_new;
-    % 
-    %     % update dt and current time
-    %     dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
-    %     t = t + dt_new;
-    %     dt = dt_new;
-    % 
-    % else
-    %     % if the above isn't satisfied we will need to recompute dt, the
-    %     % primary approx and the errors.
-        % 
-        % while ((rel_err > err_tol) && (Time.dt_new ~= Time.dt_min))
-        % 
-        %    dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
-        % 
-        %    [u_new, w_new, m_est, gamma] = compute_unew(u, u_old, w, ... 
-        %        w_old, Grid, dt, dt_new, Para, ...
-        %        G, D, model, P1);
-        % 
-        %    u_p = AM3_up(u_new, u, u_old, Para.epsilon, Para.alpha, gamma, Grid.k, ...
-        %        dt_new, Para.m, Grid.Nx, Grid.Ny, Para.beta);
-        % 
-        %    % calculate the relative error approx
-        % 
-        %    rel_err = (sqrt(sum(sum((u_new - u_p).^2)) / (Grid.Nx*Grid.Ny))) / ...
-        %        (sqrt(sum(sum(u_p.^2)) / (Grid.Nx*Grid.Ny)));
-        % 
-        %    A_dp = compute_A_dp(rho_s, err_tol, rel_err, dt_new);
-        %     end    
-        % 
-        % w_old = w;                      w = w_new;
-        % u_old = u;                      u = u_new;
-        % 
-        % t = t + dt_new;
-        % dt = dt_new;
-        % dt_vals = [dt_vals, dt];
-
-     % end
-        
+ 
     Eu(j + 1) = E_new;
 
     w_old = w;                      w = w_new;
@@ -353,53 +223,13 @@ while t < Time.tf
 
     t_vals(j + 1) = t;
 
-    % if (mod(j, nplt) == 0)                  
-    % 
-    %     Eu(j/nplt + 1) = compute_En(u, w, Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k,...
-    %         Em, G, D, model);
-    % 
-    %     Eu_SSAV(j/nplt) = (Eu(j/nplt + 1))/2 + ...
-    %         (compute_En(2*u - u_old, 2*w - w_old, Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k, ...
-    %         Em, G, D, model))/ 2 + ...
-    %         sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*Grid.dx*Grid.dy;
-    % 
-    %     mass(j/nplt + 1) = sum(sum(u))*Grid.dx*Grid.dy/(Grid.Lx*Grid.Ly);
-    % 
-    %     m_est_vals(j/nplt) = m_est;
-    % 
-    %     uu{j/nplt + 1} = u;
-    % 
-    %     tt(j/nplt + 1) = t;
-    % 
-    % end
-
-    % t = t + dt_new;
-
 end
 
-% if (mod(j, nplt) ~= 0) 
-%     Eu(end + 1) = compute_En(u, w, Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k,...
-%         Em, G, D, model);
-% 
-%     Eu_SSAV(end + 1) = (Eu(end))/2 + ...
-%         (compute_En(2*u - u_old, 2*w - w_old, Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k, ...
-%         Em, G, D, model))/ 2 + ...
-%         sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*Grid.dx*Grid.dy;
-% 
-%     mass(end + 1) = sum(sum(u))*Grid.dx*Grid.dy/(Grid.Lx*Grid.Ly);
-% 
-%     m_est_vals(end + 1) = m_est;
-% 
-%     uu{end + 1} = u;
-% 
-%     tt(end + 1) = t;
-% 
-% end
-
+nt = sum(t_vals > 0) + 1;
 
 Em = Em / (Grid.Lx*Grid.Ly);
-Eu = Eu ./ (Grid.Lx*Grid.Ly);
-% Eu_SSAV = Eu_SSAV ./ (Grid.Lx*Grid.Ly);
+Eu = Eu(1:nt) ./ (Grid.Lx*Grid.Ly);
+t_vals = t_vals(1:nt);
 
 end
 
