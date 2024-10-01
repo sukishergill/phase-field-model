@@ -6,7 +6,7 @@ Lx = 2*pi;                              Ly = 2*pi;
 nx = 256;                               ny = 256;                    
 x = Lx*(1:nx)' / nx - Lx/2;             y = Ly*(1:ny)' / ny - Ly/2;
 dt = 0.001;
-tf = 10;
+tf = 5;
 
 q = 0;
 alpha = 1.7;
@@ -23,10 +23,8 @@ S = 3*epsilon^2;
 u = 2*exp(sin(xx) + sin(yy) - 2) + 2.2*exp(-sin(xx) - sin(yy) - 2) - 1;
 
 [ xx, yy, k, tt, uu, Eu, Em, mass] = ...
-    FCH_BDF2_SAV_v3 ( nx, ny, Lx, Ly, dt, tf, epsilon, eta, B, S, u);
+    FCH_BDF2_SAV ( nx, ny, Lx, Ly, dt, tf, epsilon, eta, B, S, u);
 
-% [ xx, yy, k, tt, uu, Eu, mass] = FCH_BDF2_SAV_v2 ( nx, ny,...
-%     Lx, Ly, dt, tf, epsilon, eta1, eta2, tau, B, S, u);
 
 
 figure(1)
