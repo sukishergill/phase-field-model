@@ -29,7 +29,7 @@ uu = cell(101, 1);
 uu{1} = u;
 
 mass = zeros(1, 101);
-mass(1) = (sum(u(:))*dx*dy)/(Lx*Ly);
+mass(1) = mean(u(:));
 
 Eu = zeros(1, 101);
 
@@ -46,24 +46,24 @@ w_old = compute_w(G, B);
 Eu(1) = compute_E(u, w_old, epsilon, eta, B, dy, dy, k);
 
 H = compute_H(u, w_old, epsilon, eta, f, fp, x, y, xx, yy, nx, ny, k);
+H_old = H;
 
-% r = w_old - 0.5 * sum(sum(H.*u))*dx*dy;
+r = w_old - 0.5 * sum(sum(H.*u))*dx*dy;
 
 H2 = fftn(H);
 
-% rhat = u/dt + (epsilon^2*(2 + eta) + S) * ...
-%     real(ifftn(reshape(k.^4 .* u(:), nx, ny))) + ...
-%     r * real(ifftn( reshape(-k.^2 .* H(:), nx, ny)));
+v = fftn(u);
 
-r = u/dt + (epsilon^2*(2 + eta) + S) * ...
-    real(ifftn(reshape(k.^4 .* u(:), nx, ny))) + ...
-    (w_old - 0.5 * sum(sum(H.*u))*dx*dy) * ...
-    real(ifftn( reshape(-k.^2 .* H(:), nx, ny)));
+r_hat = u/dt + (epsilon^2*(2 + eta) + S) * ...
+    real(ifftn(reshape(k.^4 .* v(:), nx, ny))) + ...
+    r * real(ifftn( reshape(-k.^2 .* H(:), nx, ny)));
 
-P = spdiags(1/dt + epsilon^4*k.^6 + S.*k.^4, 0, nx*ny, nx*ny);
 
-r = fftn(r);
-psi_r = P \ r(:);
+% define linear operator for BDF1
+P = spdiags(1/dt + epsilon^4*k.^6 + S*k.^4, 0, nx*ny, nx*ny);
+
+r_hat = fftn(r_hat);
+psi_r = P \ r_hat(:);
 psi_r = real(ifftn(reshape(psi_r, nx, ny)));
 
 psi_H = P \ (-k.^2 .* H2(:));         
@@ -71,14 +71,14 @@ psi_H = real(ifftn(reshape(psi_H, nx, ny)));
 
 innprod_Hu = compute_ip(H, psi_r, psi_H, dx, dy);
 
-w = innprod_Hu + w_old - 0.5 * sum(sum(H.*u))*dx*dy;
+w = innprod_Hu + r;
 
 u_old = u;
 
 u = 0.5*innprod_Hu * psi_H + psi_r;
 
 % define P for BDF2
-P = spdiags(3/(2*dt) + epsilon*k.^6 + S*k.^4, 0, nx*ny, nx*ny);
+P = spdiags(3/(2*dt) + epsilon^4*k.^6 + S*k.^4, 0, nx*ny, nx*ny);
 
 if nplt == 1
     
@@ -90,11 +90,11 @@ if nplt == 1
     
     Eu(2) = compute_E(u, w, epsilon, eta, B, dx, dy, k);
     
-    mass(2) = sum(sum(u))*dx*dy/(Lx*Ly);
+    mass(2) = mean(u(:));
     
 end
 
-Em = sum(sum(0.25 * (mass(1)*ones(size(u)).^2 - 1).^2))*dx*dy;
+Em = 0.25 * (mass(1)^2 - 1)^2;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%% Main time loop %%%%%%%%%%%%%%%%% 
@@ -115,22 +115,27 @@ for j = 2 : nmax
     H_snew = compute_H(u_snew, w_snew, epsilon, eta, f, fp, x, y,...
         xx, yy, nx, ny, k);
 
+    % H_1 = compute_H(u, w, epsilon, eta, f, fp, x, y, xx, yy, nx, ny, k);
+
+    % H_snew = 2*H_1 - H_old;
+
+    % H_old = H_1;
+
     H = fftn(H_snew);
     u_snew = fftn(u_snew);
 
     r = (4*w - w_old)/3 - 0.5 * sum(sum(H_snew .* (4*u - u_old)/3)) ...
         * dx*dy;
 
-    r2 = (4*u - u_old)/(2*dt) + (epsilon^2*(2 + eta) + S) * ...
-        real(ifftn(reshape(-k.^2 .* u_snew(:), nx, ny))) + ...
+    r_hat = (4*u - u_old)/(2*dt) + (epsilon^2*(2 + eta) + S) * ...
+        real(ifftn(reshape(k.^4 .* u_snew(:), nx, ny))) + ...
         r * real(ifftn( reshape(-k.^2 .* H(:), nx, ny)));
 
-    r2 = fftn(r2);
-    H2 = fftn(H_snew);
+    r_hat = fftn(r_hat);    
     
-    psi_r = P \ r2(:);           psi_r = reshape(psi_r, nx, ny);
+    psi_r = P \ r_hat(:);           psi_r = reshape(psi_r, nx, ny);
     psi_r = real(ifftn(psi_r));
-    psi_H = P \ (-k.^2.*H2(:));     psi_H = reshape(psi_H, nx, ny);
+    psi_H = P \ (-k.^2.*H(:));     psi_H = reshape(psi_H, nx, ny);
     psi_H = real(ifftn(psi_H));
 
     innprod_Hu = compute_ip(H_snew, psi_r, psi_H, dx, dy);
@@ -146,7 +151,7 @@ for j = 2 : nmax
 
         Eu(j/nplt + 1) = compute_E(u, w, epsilon, eta, B, dx, dy, k);
         
-        mass(j/nplt + 1) = sum(sum(u))*dx*dy/(Lx*Ly);
+        mass(j/nplt + 1) = mean(u(:));
         
         uu{j/nplt + 1} = u;
         
@@ -158,7 +163,6 @@ for j = 2 : nmax
 end
 
 Eu = Eu / (Lx*Ly);
-Em = Em / (Lx*Ly);
 
 end
 
@@ -201,11 +205,16 @@ k = reshape(k, nx, ny);
 v = fftn(u);
 
 [ux, uy] = gradient(u, x, y);
+% [ux2, uy2] = gradient(u.^2, x, y);
 
 div_u = divergence(xx, yy, u.^2.*ux, u.^2.*uy);
+% u_div_u = u.^2 .* (divergence(xx, yy, ux, uy));
 
 H = (6*epsilon^2 * (u.* real(ifftn(-1i*k.*v)).^2 - div_u) + f .* fp - ...
     eta * f) / w;
+
+% H = (6*epsilon^2 * (u.* real(ifftn(-1i*k.*v)).^2 - (u_div_u + ux.*ux2 + ...
+%     uy .* uy2)) + f .* fp - eta * f) / w;
 
 end
 
@@ -221,7 +230,7 @@ function E = compute_E(u, w, epsilon, eta, B, dx, dy, k)
 
 u = fftn(u);
 
-E = sum(sum(0.5*epsilon^2 * (real(ifftn(-k.^2 .* u(:)))).^2 - ...
+E = sum(sum(0.5*epsilon^4 * (real(ifftn(-k.^2 .* u(:)))).^2 - ...
     (eta/2 + 1)*epsilon^2 * real(ifftn(-1i*k.*u(:))).^2))*...
     dx*dy + w^2 - B;
 

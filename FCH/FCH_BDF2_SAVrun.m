@@ -3,10 +3,10 @@
 epsilon = 0.18;
 m = 0.2;
 Lx = 2*pi;                              Ly = 2*pi;
-nx = 256;                               ny = 256;                    
+nx = 2^7;                               ny = 2^7;                    
 x = Lx*(1:nx)' / nx - Lx/2;             y = Ly*(1:ny)' / ny - Ly/2;
 dt = 0.001;
-tf = 5;
+tf = 50;
 
 q = 0;
 alpha = 1.7;
@@ -20,7 +20,13 @@ S = 3*epsilon^2;
 
 % Initial condition
 
+% u = 0.5 + 0.001*rand(nx, ny);
+
 u = 2*exp(sin(xx) + sin(yy) - 2) + 2.2*exp(-sin(xx) - sin(yy) - 2) - 1;
+
+%  u = sin(yy).*cos(xx);
+
+% u = 0.25*ones(size(xx));
 
 [ xx, yy, k, tt, uu, Eu, Em, mass] = ...
     FCH_BDF2_SAV ( nx, ny, Lx, Ly, dt, tf, epsilon, eta, B, S, u);
@@ -28,7 +34,7 @@ u = 2*exp(sin(xx) + sin(yy) - 2) + 2.2*exp(-sin(xx) - sin(yy) - 2) - 1;
 
 
 figure(1)
-plot(tt, Eu - Em, 'Linewidth', 4)
+plot(tt(2:end), Eu(2:end) - Em, 'Linewidth', 4)
 set(gca, 'Fontsize', 40)
 xlabel('Time', 'Interpreter','latex')
 title('$E_{FCH}$', 'Interpreter','latex')
@@ -72,4 +78,3 @@ set(c, 'Position', [0.9 0.168 0.022 0.7]);
 caxis([-1 , 1])
 set(gca, 'Fontsize', 40)
 set(gca,'TickLabelInterpreter','latex')
-colormap('gray')
