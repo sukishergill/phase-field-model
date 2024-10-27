@@ -32,9 +32,10 @@ y = Grid.Ly*(1:Grid.Ny)' / Grid.Ny - Grid.Ly/2;
 % spectral discretization
 kx = [ 0:Grid.Nx/2-1, 0.0, -Grid.Nx/2+1:-1]' / (Grid.Lx/pi/2);
 ky = [ 0:Grid.Ny/2-1, 0.0, -Grid.Ny/2+1:-1]' / (Grid.Ly/pi/2);
-[kkx,kky] = meshgrid(kx, ky);
-k = sqrt(kkx.^2 + kky.^2);
-Grid.k = k(:);
+[kxx,kyy] = meshgrid(kx, ky);
+k = sqrt(kxx.^2 + kyy.^2);
+Grid.kxx = kxx;         Grid.kyy = kyy;
+Grid.k = k;
 Grid.inv_k = 1./(Grid.k.^2);      Grid.inv_k(k == 0) = 1;
 
 % time discretization
@@ -42,7 +43,7 @@ Grid.inv_k = 1./(Grid.k.^2);      Grid.inv_k(k == 0) = 1;
 % stepping scheme will be used
 Time.dt_min = 0.001;        % minimum time step
 Time.dt_max = 0.001;        % maximum time step
-Time.tf = 10;
+Time.tf = 8;
 
 % Initial condition
 u = 0.05*sin(xx).*sin(yy);
