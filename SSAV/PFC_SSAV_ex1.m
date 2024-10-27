@@ -30,17 +30,18 @@ y = Grid.Ly*(1:Grid.Ny)' / Grid.Ny - Grid.Ly/2;
 % spectral discretization
 kx = [ 0:Grid.Nx/2-1, 0.0, -Grid.Nx/2+1:-1]' / (Grid.Lx/pi/2);
 ky = [ 0:Grid.Ny/2-1, 0.0, -Grid.Ny/2+1:-1]' / (Grid.Ly/pi/2);
-[kkx,kky] = meshgrid(kx, ky);
-k = sqrt(kkx.^2 + kky.^2);
-Grid.k = k(:);
+[kxx,kyy] = meshgrid(kx, ky);
+k = sqrt(kxx.^2 + kyy.^2);
+Grid.k = k;
+Grid.kxx = kxx;         Grid.kyy = kyy;
 Grid.inv_k = 1./(Grid.k.^2);      Grid.inv_k(k == 0) = 1;
 
 % time discretization
 % if dt_min = dt_max BDF2 will be implemented, otherwise an adaptive time
 % stepping scheme will be used
-Time.dt_max = 1;        % minimum time step
-Time.dt_min = 1;        % maximum time step
-Time.tf = 1000;
+Time.dt_max = 0.5;        % minimum time step
+Time.dt_min = 0.5;        % maximum time step
+Time.tf = 10000;
 
 % Initial condition
 u = 0.2*rand(Grid.Nx,Grid.Ny);
