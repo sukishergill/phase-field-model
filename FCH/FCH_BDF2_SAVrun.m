@@ -1,9 +1,9 @@
 % run FCH BDF2 SAV
 
-epsilon = 0.18;
+epsilon = 0.1;
 m = 0.2;
-Lx = 2*pi;                              Ly = 2*pi;
-nx = 2^7;                               ny = 2^7;                    
+Lx = 4*pi;                              Ly = 4*pi;
+nx = 2^8;                               ny = 2^8;                    
 x = Lx*(1:nx)' / nx - Lx/2;             y = Ly*(1:ny)' / ny - Ly/2;
 dt = 0.001;
 tf = 50;
@@ -11,26 +11,34 @@ tf = 50;
 q = 0;
 alpha = 1.7;
 eta = epsilon^2;
-tau = 0.125;
+
 B = Lx^5;
 S = 3*epsilon^2;
 
+eta1 = 2*epsilon;
+eta2 = eta1;
+tau = 0.125;
+d = 1.3;
 
 [xx,yy] = meshgrid(x,y);
 
 % Initial condition
 
-% u = 0.5 + 0.001*rand(nx, ny);
+u = 0.5 + 0.001*rand(nx, ny);
 
-u = 2*exp(sin(xx) + sin(yy) - 2) + 2.2*exp(-sin(xx) - sin(yy) - 2) - 1;
+% u = 2*exp(sin(xx-pi) + sin(yy) - 2) + 2.2*exp(-sin(xx-pi) - sin(yy) - 2) - 1;
 
 %  u = sin(yy).*cos(xx);
 
 % u = 0.25*ones(size(xx));
 
+% u = 0.5 * acosh((sqrt((xx).^2 + (yy).^2) - pi) / (epsilon*2)) - 1;
+
 [ xx, yy, k, tt, uu, Eu, Em, mass] = ...
     FCH_BDF2_SAV ( nx, ny, Lx, Ly, dt, tf, epsilon, eta, B, S, u);
 
+% [ xx, yy, k, tt, uu, Eu, mass] = FCH_BDF2_SAV_2 ( nx, ny, Lx, Ly,...
+%     dt, tf, epsilon, eta1, eta2, tau, B, S, u);
 
 
 figure(1)
