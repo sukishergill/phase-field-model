@@ -57,7 +57,7 @@ else
     
 end
     
-v = fftn(u);
+v = fft2(u);
 
 % define number of time steps and time steps for plotting purposes
 nplt = floor( (Time.tf / 100) / Time.dt_min);
@@ -88,15 +88,14 @@ Eu = zeros(1, nmax);
 t_vals = zeros(1, nmax);
 
 Eu(1) = compute_En(u, w_old, Para, Grid.dx, Grid.dy, Grid.inv_k,...
-    Grid.k, Em, G, D, model);
+    Grid.k, Em, D, model, Grid.kxx, Grid.kyy, Grid.Nx, Grid.Ny);
 
 H = compute_H(f, w_old);
 
 r = -0.5 * sum(sum(H.*u)) * Grid.dx*Grid.dy + w_old;
-H2 = fftn(H);
+H2 = fft2(H);
 
-r_tilde = u/dt - Para.S*real(ifftn(reshape(G .* v(:),Grid.Nx,Grid.Ny))) - ...
-    r*real(ifftn(reshape(G .* H2(:),Grid.Nx,Grid.Ny)));
+r_tilde = u/dt - Para.S*real(ifft2(G .* v)) - r*real(ifft2(G .* H2));
 
 r_hat = (Para.alpha*Para.epsilon^2*dt)/(Grid.Lx*Grid.Ly) * ...
     sum(r_tilde(:))*Grid.dx*Grid.dy + r_tilde;
@@ -108,22 +107,22 @@ m_est_vals(1) = (Para.alpha*Para.epsilon^2*dt)/(Grid.Lx*Grid.Ly) * ...
 
 if model == 2
 
-    P1 = Para.alpha*Para.epsilon^2 - Para.S*G - Para.epsilon^2*G.*D.^2;
+    P1 = Para.alpha*Para.epsilon^2 - Para.S*G(:) - Para.epsilon^2*G(:).*D(:).^2;
 
 else
 
-    P1 = Para.alpha*Para.epsilon^2 - Para.S*G + Para.epsilon^2*G.*D.^2;
+    P1 = Para.alpha*Para.epsilon^2 - Para.S*G(:) + Para.epsilon^2*G(:).*D(:).^2;
 
 end
 
 P = spdiags(1/dt + P1, 0, Grid.Nx*Grid.Ny, Grid.Nx*Grid.Ny);
 
-r_hat = fftn(r_hat);
+r_hat = fft2(r_hat);
 psi_r = P \ r_hat(:);
-psi_r = real(ifftn(reshape(psi_r, Grid.Nx, Grid.Ny)));
+psi_r = real(ifft2(reshape(psi_r, Grid.Nx, Grid.Ny)));
   
-psi_H = P \ (G .* H2(:)); 
-psi_H = real(ifftn(reshape(psi_H, Grid.Nx, Grid.Ny)));
+psi_H = P \ (G(:) .* H2(:)); 
+psi_H = real(ifft2(reshape(psi_H, Grid.Nx, Grid.Ny)));
 
 innprod_Hu = compute_ip(H, psi_r, psi_H, Grid.dx, Grid.dy);
 
@@ -138,7 +137,7 @@ dt_vals = dt;
 t = t + dt;
 
 
-Eu(2) = compute_En(u, w, Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k, Em, G, D, model);
+Eu(2) = compute_En(u, w, Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k, Em, D, model, Grid.kxx, Grid.kyy, Grid.Nx, Grid.Ny);
 E_old = Eu(1);       E = Eu(2);       t_vals(2) = t;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -164,7 +163,7 @@ while t < Time.tf
     %%%%%%%%%%%%%%%%% Adaptive time stepping %%%%%%%%%%%%%%%%%
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     E_new = compute_En(u, w, Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k,...
-        Em, G, D, model);
+        Em, D, model, Grid.kxx, Grid.kyy, Grid.Nx, Grid.Ny);
 
     ut = sum(sum(((u_new - u_old) / (dt_new + dt)).^2))*Grid.dx * Grid.dy;
 
@@ -174,7 +173,8 @@ while t < Time.tf
         (0.5 * (dt^2 + dt*dt_new));
 
     rel_err = 0.5*dt_new*abs(Et) + dt_new^2 * (Para.S/2 * ut + ...
-        (Ett < 0)*abs(Ett));
+        abs(Ett));
+        %(Ett < 0)*abs(Ett));
     rel_err = rel_err / abs(E_new);
 
     adap = 0.5*dt*(err_tol / rel_err);
@@ -188,9 +188,9 @@ while t < Time.tf
         Grid, dt, dt_new, Para, G, D,...
         model, P1);
 
-        Eu(j + 1) = compute_En(u, w, Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k, Em, G, D, model);
+        E_new = compute_En(u, w, Para, Grid.dx, Grid.dy, Grid.inv_k, Grid.k, Em, D, model, Grid.kxx, Grid.kyy, Grid.Nx, Grid.Ny);
         
-        E_new = Eu(j + 1);
+        % E_new = Eu(j + 1);
     
         ut = sum(sum(((u_new - u_old) / (dt_new + dt)).^2))*Grid.dx * Grid.dy;
     
@@ -200,7 +200,8 @@ while t < Time.tf
             (0.5 * (dt^2 + dt*dt_new));
     
         rel_err = 0.5*dt_new*abs(Et) + dt_new^2 * (Para.S/2 * ut + ...
-            (Ett < 0)*abs(Ett));
+            abs(Ett));
+            %(Ett < 0)*abs(Ett));
         rel_err = rel_err / abs(E_new);
 
         adap = 0.5*dt*(err_tol / rel_err);
@@ -210,10 +211,6 @@ while t < Time.tf
 
     % compute new time step
     dt = dt_new;
-
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    %%%%%%%%%%%%%%%%% Adaptive time stepping %%%%%%%%%%%%%%%%%
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
  
     Eu(j + 1) = E_new;
 
@@ -230,8 +227,6 @@ nt = sum(t_vals > 0) + 1;
 Em = Em / (Grid.Lx*Grid.Ly);
 Eu = Eu(1:nt) ./ (Grid.Lx*Grid.Ly);
 t_vals = t_vals(1:nt);
-
-end
 
 
 function u_snew = compute_u_snew(u, u_old)
@@ -270,12 +265,11 @@ function [r, r_hat, m_est] = compute_r(u_snew, u, u_old, w, w_old, ...
 r = -(b*w + c*w_old)/a + 0.5 * sum(sum((H_snew .* (b*u + c*u_old)/a)))...
     * Grid.dx*Grid.dy;
 
-rH = fftn(r .* H_snew);
-u_snew = fftn(u_snew);
+rH = fft2(r .* H_snew);
+u_snew = fft2(u_snew);
 
-r_tilde = -(b*u + c*u_old) - S*real(ifftn(reshape(G .* u_snew(:), ...
-    Grid.Nx, Grid.Ny))) + ...
-    real(ifftn( reshape(G .* rH(:), Grid.Nx, Grid.Ny)));
+r_tilde = -(b*u + c*u_old) - S*real(ifft2(G .* u_snew)) + ...
+    real(ifft2(G .* rH));
 
 m_est = (alpha*epsilon^2)/(a*Grid.Lx*Grid.Ly) * ...
     sum(r_tilde(:)) * Grid.dx*Grid.dy;
@@ -293,20 +287,34 @@ innprod_Hu = sum(sum(H_snew .* psi_r)) * dx*dy...
 
 end
 
-function E_n = compute_En(u, w, Para, dx, dy, inv_k, k, Em, G, D, model)
+function E_n = compute_En(u, w, Para, dx, dy, inv_k, k, Em, D, model, kxx, kyy, Nx, Ny)
 
 e = Para.epsilon^2/2;
 
-um = fftn(u - Para.m);
+um = fft2(u - Para.m);
 
-v = -inv_k .* um(:);
-v(spdiags(k) == 0) = 0;
+v = -inv_k .* um;
+v(k == 0) = 0;
 
-u = fftn(u);
+vx = real(ifft2(-1i*kxx.*v));         
+vy = real(ifft2(-1i*kyy.*v));
 
-E_n = sum(sum(e * real(ifftn(D.*u(:))).^2 + ...
-    Para.alpha*e * real(ifftn(D.*v)).^2))*dx*dy + ...
-    w^2 - Para.B;
+dv = vx.^2 + vy.^2;
+
+u = fft2(u);
+
+if model == 2
+
+    du = D.*u;
+else
+
+    ux = real(ifft2(-1i*kxx.*u));         
+    uy = real(ifft2(-1i*kyy.*u));
+
+    du = ux.^2 + uy.^2;
+end
+
+E_n = sum(sum(e *du + Para.alpha*e * dv))*dx*dy +  w^2 - Para.B;
 
 end
 
@@ -326,11 +334,11 @@ end
 function u_p = AM3_up(u_new, u, u_old, epsilon, alpha, gamma, k, ...
     dt_new, m, Nx, Ny, beta)
 
-unew_fft = fftn(u_new);     fnew_fft = fftn(compute_f(u_new, beta));   
+unew_fft = fft2(u_new);     fnew_fft = fft2(compute_f(u_new, beta));   
 
-u_fft = fftn(u);            f_fft = fftn(compute_f(u, beta));                        
+u_fft = fft2(u);            f_fft = fft2(compute_f(u, beta));                        
 
-uold_fft = fftn(u_old);     fold_fft = fftn(compute_f(u_old, beta));
+uold_fft = fft2(u_old);     fold_fft = fft2(compute_f(u_old, beta));
 
 F_tilde_unew = compute_F_tilde(unew_fft, u_new, fnew_fft, k, epsilon, ...
     alpha, m, Nx, Ny);
@@ -348,8 +356,8 @@ end
 
 function F_tilde = compute_F_tilde(u_fft, u, f_fft, k, epsilon, alpha, m, Nx, Ny)
 
-F_tilde = -epsilon^2 * real(ifftn(reshape(k.^4 .* u_fft(:), Nx, Ny))) + ...
-    real(ifftn(reshape(-k.^2 .* f_fft(:), Nx, Ny))) + ...
+F_tilde = -epsilon^2 * real(ifft2(k.^4 .* u_fft)) + ...
+    real(ifft2(-k.^2 .* f_fft)) + ...
     alpha * epsilon * (u - m);
 
 end
@@ -384,18 +392,20 @@ H_snew = compute_H(f, w_snew);
 % define P for BDF2    
 P = spdiags(a + P1, 0, Grid.Nx*Grid.Ny, Grid.Nx*Grid.Ny);
 
-r_hat = fftn(r_hat);
+r_hat = fft2(r_hat);
 psi_r = P \ r_hat(:);           psi_r = reshape(psi_r, Grid.Nx, Grid.Ny);
-psi_r = real(ifftn(psi_r));
+psi_r = real(ifft2(psi_r));
 
-H2 = fftn(H_snew);
-psi_H = P \ (G.*H2(:));     psi_H = reshape(psi_H, Grid.Nx, Grid.Ny);
-psi_H = real(ifftn(psi_H));
+H2 = fft2(H_snew);
+psi_H = P \ (G(:).*H2(:));     psi_H = reshape(psi_H, Grid.Nx, Grid.Ny);
+psi_H = real(ifft2(psi_H));
 
 innprod_Hu = compute_ip(H_snew, psi_r, psi_H, Grid.dx, Grid.dy);
 
 w_new = 0.5*innprod_Hu + r;      
 
 u_new = 0.5*innprod_Hu * psi_H + psi_r;
+
+end
 
 end
