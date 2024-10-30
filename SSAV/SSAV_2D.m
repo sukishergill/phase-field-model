@@ -82,7 +82,7 @@ mass(1) = (sum(u(:))*Grid.dx*Grid.dy)/(Grid.Lx*Grid.Ly);
 
 m_est_vals = zeros(1, 100);
 
-Em = sum(sum((compute_F(Para.m*ones(size(u)), Para.beta))))*Grid.dx*Grid.dy;
+Em = Grid.Lx*Grid.Ly * compute_F(Para.m, Para.beta);
 
 Eu = zeros(1, nmax);
 t_vals = zeros(1, nmax);
