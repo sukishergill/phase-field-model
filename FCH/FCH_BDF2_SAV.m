@@ -96,7 +96,7 @@ end
 
 [Fm, fm, fpm] = compute_F(mass(1));
 
-Em = 0.5*fm^2 - eta*Fm;         Em = Em*Lx*Ly;
+Em = 0.5*fm^2 - eta*Fm;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%% Main time loop %%%%%%%%%%%%%%%%% 
