@@ -1,4 +1,4 @@
-function [u, Eu, Em, mass, m_est_vals, t_vals, dt_vals]...
+function [u, Eu, Eu_SSAV, Eu_SSAV_test, Em, mass, t_vals]...
     = SSAV_2D (Grid, Time, Para, u, model)
 
 % This function solves the following PDE
@@ -33,7 +33,7 @@ function [u, Eu, Em, mass, m_est_vals, t_vals, dt_vals]...
 %           2. Phase-field-crystals
 %           3. Allen-Cahn
 
-err_tol = 1E-3;        % error tolerance
+err_tol = 1E-3;
 
 dt = Time.dt_min;
 
@@ -81,16 +81,11 @@ t = 0;
 mass = zeros(1, 101);
 mass(1) = (sum(u(:))*Grid.dx*Grid.dy)/(Grid.Lx*Grid.Ly);
 
-m_est_vals = zeros(1, 100);
-
 Em = Grid.Lx*Grid.Ly * compute_F(Para.m);
 
 Eu = zeros(1, nmax);
 Eu_SSAV = zeros(1, nmax);
 Eu_SSAV_test = zeros(1, nmax);
-u_t = zeros(1, nmax-1);
-E_t = zeros(1, nmax-1);
-E_tt = zeros(1, nmax-1);
 t_vals = zeros(1, nmax);
 
 Eu(1) = compute_En(u, w_old);
@@ -102,15 +97,12 @@ H = compute_H(f, w_old);
 r = -0.5 * sum(H.*u, 'all') * Grid.dx*Grid.dy + w_old;
 H2 = fft2(H);
 
+ufft = fft2(u);
+
 r_tilde = u/dt - Para.S*real(ifft2(G .* ufft)) - r*real(ifft2(G .* H2));
 
 r_hat = (Para.alpha*Para.epsilon^2*dt)/(Grid.Lx*Grid.Ly) * ...
     sum(r_tilde(:))*Grid.dx*Grid.dy + r_tilde;
-
-
-m_est_vals(1) = (Para.alpha*Para.epsilon^2*dt)/(Grid.Lx*Grid.Ly) * ...
-    sum(r_tilde(:))*Grid.dx*Grid.dy;
-
 
 if model == 2
 
@@ -139,8 +131,6 @@ u_old = u;
 
 u = 0.5*innprod_Hu * psi_H + psi_r;
 
-dt_vals = dt;
-
 t = t + dt;
 
 Eu(2) = compute_En(u, w);
@@ -167,7 +157,7 @@ while t < Time.tf
     
     t = t + dt_new;
 
-    [u_new, w_new, m_est, gamma] = compute_unew(u, u_old, w, w_old, ...
+    [u_new, w_new, gamma] = compute_unew(u, u_old, w, w_old, ...
         dt, dt_new);
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -186,7 +176,7 @@ while t < Time.tf
 
     while (rel_err > err_tol) && (dt_new ~= Time.dt_min)
 
-        [u_new, w_new, m_est, gamma] = compute_unew(u, u_old, w, w_old, ...
+        [u_new, w_new, gamma] = compute_unew(u, u_old, w, w_old, ...
             dt, dt_new);
 
         E_new = compute_En(u_new, w_new);
@@ -207,13 +197,14 @@ while t < Time.tf
  
     Eu(j + 1) = E_new;
 
-    Eu_SSAV_test(j+1) = (Eu(j+1))/2 + (compute_En(2*u - u, 2*w - w)) / 2 + ...
+    Eu_SSAV_test(j+1) = (Eu(j+1))/2 + (compute_En(2*u_new - u_new,...
+        2*w_new - w_new)) / 2 + ...
         sum(sum(Para.S/2 * (u(:) - u(:)).^2))*Grid.dx*Grid.dy;
-    Eu_SSAV(j) = E_mod;
+    Eu_SSAV(j) = (Eu(j+1))/2 + (compute_En(2*u_new - u, 2*w_new - w)) / 2 + ...
+        sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*Grid.dx*Grid.dy;
 
     w_old = w;                      w = w_new;
     u_old = u;                      u = u_new;
-    E_old = E;                      E = E_new;
 
     t_vals(j + 1) = t;
 
@@ -239,11 +230,6 @@ F = 0.25 * (u.^2 - Para.beta).^2;
 
 end
 
-% function F = compute_F(u, beta)
-% 
-% F = 0.25 * (u.^2 - beta).^2;
-% 
-% end
 
 function w = compute_w(int_F)
 
@@ -257,7 +243,7 @@ H = f / w;
 
 end
 
-function [r, r_hat, m_est] = compute_r(u_snew, u, u_old, w, w_old, ... 
+function [r, r_hat] = compute_r(u_snew, u, u_old, w, w_old, ... 
     H_snew, dt, a, b, c)
 
 r = -(b*w + c*w_old)/a + 0.5 * sum(sum((H_snew .* (b*u + c*u_old)/a)))...
@@ -329,40 +315,13 @@ c = gamma^2 / (1 + gamma);                  c = c / dt_new;
 end
 
 
-function u_AM = AM3_up(u_new, u, u_old, gamma, dt_new)
-
-unew_fft = fft2(u_new);     fnew_fft = fft2(compute_F(u_new));   
-
-u_fft = fft2(u);            f_fft = fft2(compute_F(u));                        
-
-uold_fft = fft2(u_old);     fold_fft = fft2(compute_F(u_old));
-
-F_tilde_unew = compute_F_tilde(unew_fft, u_new, fnew_fft);
-
-F_tilde_u = compute_F_tilde(u_fft, u, f_fft);
-
-F_tilde_uold = compute_F_tilde(uold_fft, u_old, fold_fft);
-
-u_AM = u + (dt_new / 6) * (((3 + 2*gamma)/(1 + gamma))*F_tilde_unew + ...
-    (3 + gamma)*F_tilde_u - (gamma^2 / (1 + gamma))*F_tilde_uold);
-
-end
-
-function F_tilde = compute_F_tilde(u_fft, u, f_fft)
-
-F_tilde = -Para.epsilon^2 * real(ifft2(k4 .* u_fft)) + ...
-    real(ifft2(-k2 .* f_fft)) + ...
-    Para.alpha * Para.epsilon * (u - Para.m);
-
-end
-
 function A_dp = compute_A_dp(rel_err, dt)
 
 A_dp = rho_s * dt * (err_tol / rel_err) ^ (1/3);
 
 end
 
-function [u_new, w_new, m_est, gamma] = compute_unew(u, u_old, w, w_old,...
+function [u_new, w_new, gamma] = compute_unew(u, u_old, w, w_old,...
     dt, dt_new)
 
 u_snew = compute_u_snew(u, u_old);
@@ -380,7 +339,7 @@ H_snew = compute_H(f, w_snew);
 
 [a, b, c, gamma] =  compute_dt_coeffs(dt_new, dt);
 
-[r, r_hat, m_est] = compute_r(u_snew, u, u_old, w, w_old, H_snew, ...
+[r, r_hat] = compute_r(u_snew, u, u_old, w, w_old, H_snew, ...
     dt_new, a, b, c);
 
 % define P for BDF2    
