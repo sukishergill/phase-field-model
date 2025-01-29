@@ -1,4 +1,4 @@
-function [u, Eu, Eu_SSAV, Eu_SSAV_test, Em, mass, t_vals]...
+function [u, Eu, Em, mass, t_vals, rel_err_vals]...
     = SSAV_2D_AM (Grid, Time, Para, u, model)
 
 % This function solves the following PDE
@@ -33,7 +33,7 @@ function [u, Eu, Eu_SSAV, Eu_SSAV_test, Em, mass, t_vals]...
 %           2. Phase-field-crystals
 %           3. Allen-Cahn
 
-err_tol = 10E-5;
+% err_tol = 10E-5;
 
 rho_s = 0.9;
 
@@ -74,6 +74,10 @@ nmax = round(Time.tf / Time.dt_min);
 [F, f] = compute_F(u);         int_F = sum(F(:)) * Grid.dx*Grid.dy;
 % f = compute_f(u, Para.beta);
 
+u_fft = fft2(u);
+
+F_tilde_old = compute_F_tilde(u, u_fft, f);
+
 % define the following as w_old b/c we will need this in the for loop
 w_old = compute_w(int_F);   
 
@@ -86,22 +90,26 @@ mass(1) = (sum(u(:))*Grid.dx*Grid.dy)/(Grid.Lx*Grid.Ly);
 Em = Grid.Lx*Grid.Ly * compute_F(Para.m);
 
 Eu = zeros(1, nmax);
-Eu_SSAV = zeros(1, nmax);
-Eu_SSAV_test = zeros(1, nmax);
+% Eu_SSAV = zeros(1, nmax);
+% Eu_SSAV_test = zeros(1, nmax);
 t_vals = zeros(1, nmax);
 
-Eu(1) = compute_En(u, w_old);
-Eu_SSAV_test(1) = (Eu(1))/2 + (compute_En(2*u - u, 2*w_old - w_old)) / 2 + ...
-    sum(Para.S/2 * (u - u).^2, 'all')*Grid.dx*Grid.dy;
+rel_err_vals = zeros(1,nmax);
+
+Eu(1) = compute_En(u, u_fft, w_old);
+% Eu_SSAV_test(1) = (Eu(1))/2 + (compute_En(2*u - u, 2*w_old - w_old)) / 2 + ...
+%     sum(Para.S/2 * (u - u).^2, 'all')*Grid.dx*Grid.dy;
+
 
 H = compute_H(f, w_old);
 
 r = -0.5 * sum(H.*u, 'all') * Grid.dx*Grid.dy + w_old;
 H2 = fft2(H);
 
-ufft = fft2(u);
+% F_tilde_old = compute_F_tilde(u, u_fft, w_old, H2);
 
-r_tilde = u/dt - Para.S*real(ifft2(G .* ufft)) - r*real(ifft2(G .* H2));
+
+r_tilde = u/dt - Para.S*real(ifft2(G .* u_fft)) - r*real(ifft2(G .* H2));
 
 r_hat = (Para.alpha*Para.epsilon^2*dt)/(Grid.Lx*Grid.Ly) * ...
     sum(r_tilde(:))*Grid.dx*Grid.dy + r_tilde;
@@ -135,14 +143,22 @@ u = 0.5*innprod_Hu * psi_H + psi_r;
 
 t = t + dt;
 
-Eu(2) = compute_En(u, w);
-Eu_SSAV_test(2) = (Eu(2))/2 + (compute_En(2*u - u, 2*w - w)) / 2 + ...
-    sum(sum(Para.S/2 * (u(:) - u(:)).^2))*Grid.dx*Grid.dy;
-Eu_SSAV(1) = (Eu(2))/2 + (compute_En(2*u - u_old, 2*w - w_old)) / 2 + ...
-    sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*Grid.dx*Grid.dy;
+u_fft = fft2(u);
+
+Eu(2) = compute_En(u, u_fft, w);
+% Eu_SSAV_test(2) = (Eu(2))/2 + (compute_En(2*u - u, 2*w - w)) / 2 + ...
+%     sum(sum(Para.S/2 * (u(:) - u(:)).^2))*Grid.dx*Grid.dy;
+% Eu_SSAV(1) = (Eu(2))/2 + (compute_En(2*u - u_old, 2*w - w_old)) / 2 + ...
+%     sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*Grid.dx*Grid.dy;
 
 E_old = Eu(1);       E = Eu(2);       t_vals(2) = t;
 
+[F, f] = compute_F(u);
+
+% H = compute_H(f, w);
+% H_fft = fft2(H);
+
+F_tilde = compute_F_tilde(u, u_fft, f);
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%% Main time loop %%%%%%%%%%%%%%%%% 
@@ -162,46 +178,66 @@ while t < Time.tf
     [u_new, w_new, gamma] = compute_unew(u, u_old, w, w_old, ...
         dt, dt_new);
 
+    [F, f] = compute_F(u_new);
+
+    u_fft = fft2(u_new);
+
+    F_tilde_new = compute_F_tilde(u, u_fft, f);
+    % F_tilde_new = compute_F_tilde(u, u_fft, w_new, H_fft);
+
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %%%%%%%%%%%%%%%%% Adaptive time stepping %%%%%%%%%%%%%%%%%
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     % Compute third order accurate approximation
-    u_p = AM3_up(u_new, u, u_old, gamma, dt_new);
+    u_p = AM3_up(u, gamma, dt_new, F_tilde_old, F_tilde, F_tilde_new);
 
-    rel_err = norm(u_new - u_p, 2) / norm(u_p, 2);
+    % rel_err = norm(u_new - u_p, 2) / norm(u_p, 2);
+    rel_err = sum((u_new - u_p).^2, 'all') / sum((u_p).^2, 'all');
 
-    A_dp = compute_A_dp(rel_err, dt_new);
+    A_dp = compute_Adp(rel_err, dt_new);
 
     dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
 
-    while (rel_err > err_tol) && (dt_new ~= Time.dt_min)
+    while (rel_err > Para.err_tol) && (dt_new ~= Time.dt_min)
 
         [u_new, w_new, gamma] = compute_unew(u, u_old, w, w_old, ...
             dt, dt_new);
+
+        [F, f] = compute_F(u_new);
+
+        u_fft = fft2(u_new);
+
+        F_tilde_new = compute_F_tilde(u, u_fft, f);
+
+        % F_tilde_new = compute_F_tilde(u, u_fft, w_new, H_fft);
     
-        u_p = AM3_up(u_new, u, u_old, gamma, dt_new);
+        u_p = AM3_up(u, gamma, dt_new, F_tilde_old, F_tilde, F_tilde_new);
 
-        rel_err = norm(u_new - u_p, 2) / norm(u_p, 2);
+        % rel_err = norm(u_new - u_p, 2) / norm(u_p, 2);
+        rel_err = sum((u_new - u_p).^2, 'all') / sum((u_p).^2, 'all');
 
-        A_dp = compute_A_dp(rel_err, dt_new);
+        A_dp = compute_Adp(rel_err, dt_new);
 
         dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
     end
 
+    rel_err_vals(j - 1) = sum((u_new - u_p).^2, 'all') / (Grid.Nx*Grid.Ny);
+
     % compute new time step
     dt = dt_new;
  
-    Eu(j + 1) = compute_En(u_new, w_new);
+    Eu(j + 1) = compute_En(u_new, u_fft, w_new);
 
-    Eu_SSAV_test(j+1) = (Eu(j+1))/2 + (compute_En(2*u_new - u_new,...
-        2*w_new - w_new)) / 2 + ...
-        sum(sum(Para.S/2 * (u(:) - u(:)).^2))*Grid.dx*Grid.dy;
-    Eu_SSAV(j) = (Eu(j+1))/2 + (compute_En(2*u_new - u, 2*w_new - w)) / 2 + ...
-        sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*Grid.dx*Grid.dy;
+    % Eu_SSAV_test(j+1) = (Eu(j+1))/2 + (compute_En(2*u_new - u_new,...
+    %     2*w_new - w_new)) / 2 + ...
+    %     sum(sum(Para.S/2 * (u(:) - u(:)).^2))*Grid.dx*Grid.dy;
+    % Eu_SSAV(j) = (Eu(j+1))/2 + (compute_En(2*u_new - u, 2*w_new - w)) / 2 + ...
+    %     sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*Grid.dx*Grid.dy;
 
     w_old = w;                      w = w_new;
     u_old = u;                      u = u_new;
+    F_tilde_old = F_tilde;          F_tilde = F_tilde_new;
 
     t_vals(j + 1) = t;
 
@@ -273,7 +309,7 @@ innprod_Hu = sum(sum(H_snew .* psi_r)) * Grid.dx*Grid.dy...
 
 end
 
-function E_n = compute_En(u, w)
+function E_n = compute_En(u, u_fft, w)
 
 e = Para.epsilon^2/2;
 
@@ -287,15 +323,15 @@ vy = real(ifft2(-1i*Grid.kyy.*v));
 
 dv = vx.^2 + vy.^2;
 
-u = fft2(u);
+% u_fft = fft2(u);
 
 if model == 2
 
-    du = D.*u;
+    du = D.*u_fft;
 else
 
-    ux = real(ifft2(-1i*Grid.kxx.*u));         
-    uy = real(ifft2(-1i*Grid.kyy.*u));
+    ux = real(ifft2(-1i*Grid.kxx.*u_fft));         
+    uy = real(ifft2(-1i*Grid.kyy.*u_fft));
 
     du = ux.^2 + uy.^2;
 end
@@ -317,26 +353,29 @@ c = gamma^2 / (1 + gamma);                  c = c / dt_new;
 end
 
 
-function u_AM = AM3_up(u_new, u, u_old, gamma, dt_new)
+function u_AM = AM3_up(u, gamma, dt_new, ...
+        F_tilde_old, F_tilde, F_tilde_new)
 
-unew_fft = fft2(u_new);     fnew_fft = fft2(compute_F(u_new));   
+% unew_fft = fft2(u_new);     fnew_fft = fft2(compute_F(u_new));   
+% 
+% u_fft = fft2(u);            f_fft = fft2(compute_F(u));                        
+% 
+% uold_fft = fft2(u_old);     fold_fft = fft2(compute_F(u_old));
+% 
+% F_tilde_unew = compute_F_tilde(unew_fft, u_new, fnew_fft);
+% 
+% F_tilde_u = compute_F_tilde(u_fft, u, f_fft);
+% 
+% F_tilde_uold = compute_F_tilde(uold_fft, u_old, fold_fft);
 
-u_fft = fft2(u);            f_fft = fft2(compute_F(u));                        
-
-uold_fft = fft2(u_old);     fold_fft = fft2(compute_F(u_old));
-
-F_tilde_unew = compute_F_tilde(unew_fft, u_new, fnew_fft);
-
-F_tilde_u = compute_F_tilde(u_fft, u, f_fft);
-
-F_tilde_uold = compute_F_tilde(uold_fft, u_old, fold_fft);
-
-u_AM = u + (dt_new / 6) * (((3 + 2*gamma)/(1 + gamma))*F_tilde_unew + ...
-    (3 + gamma)*F_tilde_u - (gamma^2 / (1 + gamma))*F_tilde_uold);
+u_AM = u + (dt_new / 6) * (((3 + 2*gamma)/(1 + gamma))*F_tilde_new + ...
+    (3 + gamma)*F_tilde - ((gamma^2) / (1 + gamma))*F_tilde_old);
 
 end
 
-function F_tilde = compute_F_tilde(u_fft, u, f_fft)
+function F_tilde = compute_F_tilde(u, u_fft, f)
+
+f_fft = fft2(f);
 
 F_tilde = -Para.epsilon^2 * real(ifft2(k4 .* u_fft)) + ...
     real(ifft2(-k2 .* f_fft)) + ...
@@ -344,9 +383,9 @@ F_tilde = -Para.epsilon^2 * real(ifft2(k4 .* u_fft)) + ...
 
 end
 
-function A_dp = compute_A_dp(rel_err, dt)
+function A_dp = compute_Adp(rel_err, dt)
 
-A_dp = rho_s * dt * (err_tol / rel_err) ^ (1/3);
+A_dp = rho_s * dt * (Para.err_tol / rel_err) ^ (1/3);
 
 end
 
@@ -366,7 +405,7 @@ w_snew = compute_w(int_F);
 % H^{*,n+1}
 H_snew = compute_H(f, w_snew);
 
-[a, b, c, gamma] =  compute_dt_coeffs(dt_new, dt);
+[a, b, c, gamma] =  compute_dt_coeffs(dt, dt_new);
 
 [r, r_hat] = compute_r(u_snew, u, u_old, w, w_old, H_snew, ...
     dt_new, a, b, c);
@@ -378,8 +417,8 @@ r_hat = fft2(r_hat);
 psi_r = P \ r_hat(:);           psi_r = reshape(psi_r, Grid.Nx, Grid.Ny);
 psi_r = real(ifft2(psi_r));
 
-H2 = fft2(H_snew);
-psi_H = P \ (G(:).*H2(:));     psi_H = reshape(psi_H, Grid.Nx, Grid.Ny);
+H_fft = fft2(H_snew);
+psi_H = P \ (G(:).*H_fft(:));     psi_H = reshape(psi_H, Grid.Nx, Grid.Ny);
 psi_H = real(ifft2(psi_H));
 
 innprod_Hu = compute_ip(H_snew, psi_r, psi_H);

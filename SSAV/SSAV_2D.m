@@ -1,4 +1,4 @@
-function [u, Eu, Eu_SSAV, Eu_SSAV_test, Em, mass, t_vals]...
+function [u, Eu, Eu_SSAV, Em, mass, t_vals]...
     = SSAV_2D (Grid, Time, Para, u, model)
 
 % This function solves the following PDE
@@ -33,7 +33,7 @@ function [u, Eu, Eu_SSAV, Eu_SSAV_test, Em, mass, t_vals]...
 %           2. Phase-field-crystals
 %           3. Allen-Cahn
 
-err_tol = 1E-3;
+% err_tol = 10E-5;
 
 dt = Time.dt_min;
 
@@ -64,7 +64,6 @@ end
 nplt = floor( (Time.tf / 100) / Time.dt_min);
 nmax = round(Time.tf / Time.dt_min);
 
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%% Compute u^1 using backward Euler %%%%%%%% 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -77,20 +76,21 @@ w_old = compute_w(int_F);
 
 t = 0;
 
-
 mass = zeros(1, 101);
 mass(1) = (sum(u(:))*Grid.dx*Grid.dy)/(Grid.Lx*Grid.Ly);
 
 Em = Grid.Lx*Grid.Ly * compute_F(Para.m);
 
-Eu = zeros(1, nmax);
+Eu = zeros(1, nmax); 
 Eu_SSAV = zeros(1, nmax);
-Eu_SSAV_test = zeros(1, nmax);
+% Eu_SSAV_test = zeros(1, nmax);
 t_vals = zeros(1, nmax);
+% uu = cell(101, 1);
+% uu{1} = u;
 
 Eu(1) = compute_En(u, w_old);
-Eu_SSAV_test(1) = (Eu(1))/2 + (compute_En(2*u - u, 2*w_old - w_old)) / 2 + ...
-    sum(Para.S/2 * (u - u).^2, 'all')*Grid.dx*Grid.dy;
+% Eu_SSAV_test(1) = (Eu(1))/2 + (compute_En(2*u - u, 2*w_old - w_old)) / 2 + ...
+%     sum(Para.S/2 * (u - u).^2, 'all')*Grid.dx*Grid.dy;
 
 H = compute_H(f, w_old);
 
@@ -134,8 +134,8 @@ u = 0.5*innprod_Hu * psi_H + psi_r;
 t = t + dt;
 
 Eu(2) = compute_En(u, w);
-Eu_SSAV_test(2) = (Eu(2))/2 + (compute_En(2*u - u, 2*w - w)) / 2 + ...
-    sum(sum(Para.S/2 * (u(:) - u(:)).^2))*Grid.dx*Grid.dy;
+% Eu_SSAV_test(2) = (Eu(2))/2 + (compute_En(2*u - u, 2*w - w)) / 2 + ...
+%     sum(sum(Para.S/2 * (u(:) - u(:)).^2))*Grid.dx*Grid.dy;
 Eu_SSAV(1) = (Eu(2))/2 + (compute_En(2*u - u_old, 2*w - w_old)) / 2 + ...
     sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*Grid.dx*Grid.dy;
 
@@ -170,11 +170,13 @@ while t < Time.tf
 
     rel_err = abs(E_new - E_mod);
 
-    adap = 0.5*dt*(err_tol / rel_err);
+    adap = 0.5*dt*(Para.err_tol / rel_err);
 
     dt_new = max(Time.dt_min, min(adap, Time.dt_max));
 
-    while (rel_err > err_tol) && (dt_new ~= Time.dt_min)
+    l = 1;
+
+    while (rel_err > Para.err_tol) && (dt_new ~= Time.dt_min)
 
         [u_new, w_new, gamma] = compute_unew(u, u_old, w, w_old, ...
             dt, dt_new);
@@ -187,9 +189,15 @@ while t < Time.tf
     
         rel_err = abs(E_new - E_mod);
 
-        adap = 0.5*dt*(err_tol / rel_err);
+        adap = 0.5*dt*(Para.err_tol / rel_err);
 
         dt_new = max(Time.dt_min, min(adap, Time.dt_max));
+
+        l = l + 1;
+
+        if l == 10
+            dt_new = Time.dt_min;
+        end
     end
 
     % compute new time step
@@ -197,14 +205,21 @@ while t < Time.tf
  
     Eu(j + 1) = E_new;
 
-    Eu_SSAV_test(j+1) = (Eu(j+1))/2 + (compute_En(2*u_new - u_new,...
-        2*w_new - w_new)) / 2 + ...
-        sum(sum(Para.S/2 * (u(:) - u(:)).^2))*Grid.dx*Grid.dy;
+    % Eu_SSAV_test(j+1) = (Eu(j+1))/2 + (compute_En(2*u_new - u_new,...
+    %     2*w_new - w_new)) / 2 + ...
+    %     sum(sum(Para.S/2 * (u(:) - u(:)).^2))*Grid.dx*Grid.dy;
     Eu_SSAV(j) = (Eu(j+1))/2 + (compute_En(2*u_new - u, 2*w_new - w)) / 2 + ...
         sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*Grid.dx*Grid.dy;
 
     w_old = w;                      w = w_new;
     u_old = u;                      u = u_new;
+
+    % uu{j + 1} = u;
+    % if (mod(j, nplt) == 0)                  
+    % 
+    %     uu{j/nplt + 1} = u;
+    % 
+    % end
 
     t_vals(j + 1) = t;
 
@@ -213,8 +228,9 @@ end
 nt = sum(t_vals > 0) + 1;
 
 % Em = Em; % / (Grid.Lx*Grid.Ly);
-Eu = Eu(1:nt); %./ (Grid.Lx*Grid.Ly);
-t_vals = t_vals(1:nt);
+% Eu = Eu(1:nt); %./ (Grid.Lx*Grid.Ly);
+% t_vals = t_vals(1:nt);
+% Eu_SSAV = Eu_SSAV(1:nt);
 
 function u_snew = compute_u_snew(u, u_old)
 
@@ -306,18 +322,22 @@ function [a, b, c, gamma] = compute_dt_coeffs(dt, dt_new)
 
 gamma = dt_new / dt;
 
-a = (1 + 2*gamma) / (1 + gamma);            a = a / dt_new;
+% a = (1 + 2*gamma) / (1 + gamma);            a = a / dt_new;
 
-b = -(1 + gamma)^2 / (1 + gamma);           b = b / dt_new;
+a = 1 / dt_new + 1 / (dt_new + dt);
 
-c = gamma^2 / (1 + gamma);                  c = c / dt_new;
+% b = -(1 + gamma)^2 / (1 + gamma);           b = b / dt_new;
+b = - 1 / dt_new - 1 / dt;
+
+% c = gamma^2 / (1 + gamma);                  c = c / dt_new;
+c = 1 / dt - 1 / (dt_new + dt);
 
 end
 
 
 function A_dp = compute_A_dp(rel_err, dt)
 
-A_dp = rho_s * dt * (err_tol / rel_err) ^ (1/3);
+A_dp = rho_s * dt * (Para.err_tol / rel_err) ^ (1/3);
 
 end
 
@@ -337,7 +357,7 @@ w_snew = compute_w(int_F);
 % H^{*,n+1}
 H_snew = compute_H(f, w_snew);
 
-[a, b, c, gamma] =  compute_dt_coeffs(dt_new, dt);
+[a, b, c, gamma] =  compute_dt_coeffs(dt, dt_new);
 
 [r, r_hat] = compute_r(u_snew, u, u_old, w, w_old, H_snew, ...
     dt_new, a, b, c);
