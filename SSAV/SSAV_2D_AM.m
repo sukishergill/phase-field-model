@@ -166,14 +166,15 @@ F_tilde = compute_F_tilde(u, u_fft, f);
 
 j = 1;
 
+dt_new = dt;
 
 while t < Time.tf
 
     j = j + 1;
 
-    dt_new = dt;
+    % dt_new = dt;
     
-    t = t + dt_new;
+    % t = t + dt_new;
 
     [u_new, w_new, gamma] = compute_unew(u, u_old, w, w_old, ...
         dt, dt_new);
@@ -182,7 +183,7 @@ while t < Time.tf
 
     u_fft = fft2(u_new);
 
-    F_tilde_new = compute_F_tilde(u, u_fft, f);
+    F_tilde_new = compute_F_tilde(u_new, u_fft, f);
     % F_tilde_new = compute_F_tilde(u, u_fft, w_new, H_fft);
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -192,15 +193,15 @@ while t < Time.tf
     % Compute third order accurate approximation
     u_p = AM3_up(u, gamma, dt_new, F_tilde_old, F_tilde, F_tilde_new);
 
-    % rel_err = norm(u_new - u_p, 2) / norm(u_p, 2);
     rel_err = sum((u_new - u_p).^2, 'all') / sum((u_p).^2, 'all');
 
-    A_dp = compute_Adp(rel_err, dt_new);
+    A_dp = compute_Adp(rel_err, dt_new); 
 
-    dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
+    % dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
 
     while (rel_err > Para.err_tol) && (dt_new ~= Time.dt_min)
 
+        dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
         [u_new, w_new, gamma] = compute_unew(u, u_old, w, w_old, ...
             dt, dt_new);
 
@@ -208,24 +209,28 @@ while t < Time.tf
 
         u_fft = fft2(u_new);
 
-        F_tilde_new = compute_F_tilde(u, u_fft, f);
+        F_tilde_new = compute_F_tilde(u_new, u_fft, f);
 
         % F_tilde_new = compute_F_tilde(u, u_fft, w_new, H_fft);
     
         u_p = AM3_up(u, gamma, dt_new, F_tilde_old, F_tilde, F_tilde_new);
 
-        % rel_err = norm(u_new - u_p, 2) / norm(u_p, 2);
         rel_err = sum((u_new - u_p).^2, 'all') / sum((u_p).^2, 'all');
 
         A_dp = compute_Adp(rel_err, dt_new);
 
-        dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
+        % dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
     end
+
+    dt = dt_new;
+    dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
+
+    t = t + dt;
 
     rel_err_vals(j - 1) = sum((u_new - u_p).^2, 'all') / (Grid.Nx*Grid.Ny);
 
     % compute new time step
-    dt = dt_new;
+    % dt = dt_new;
  
     Eu(j + 1) = compute_En(u_new, u_fft, w_new);
 
@@ -356,20 +361,8 @@ end
 function u_AM = AM3_up(u, gamma, dt_new, ...
         F_tilde_old, F_tilde, F_tilde_new)
 
-% unew_fft = fft2(u_new);     fnew_fft = fft2(compute_F(u_new));   
-% 
-% u_fft = fft2(u);            f_fft = fft2(compute_F(u));                        
-% 
-% uold_fft = fft2(u_old);     fold_fft = fft2(compute_F(u_old));
-% 
-% F_tilde_unew = compute_F_tilde(unew_fft, u_new, fnew_fft);
-% 
-% F_tilde_u = compute_F_tilde(u_fft, u, f_fft);
-% 
-% F_tilde_uold = compute_F_tilde(uold_fft, u_old, fold_fft);
-
-u_AM = u + (dt_new / 6) * (((3 + 2*gamma)/(1 + gamma))*F_tilde_new + ...
-    (3 + gamma)*F_tilde - ((gamma^2) / (1 + gamma))*F_tilde_old);
+u_AM = u + (dt_new / (6*(1 + gamma))) * ((3 + 2*gamma)*F_tilde_new + ...
+    (3 + gamma)*(1 + gamma)*F_tilde - (gamma^2)*F_tilde_old);
 
 end
 
@@ -377,8 +370,8 @@ function F_tilde = compute_F_tilde(u, u_fft, f)
 
 f_fft = fft2(f);
 
-F_tilde = -Para.epsilon^2 * real(ifft2(k4 .* u_fft)) + ...
-    real(ifft2(-k2 .* f_fft)) + ...
+F_tilde = -Para.epsilon^2 * real(ifft2(k4 .* u_fft)) - ...
+    real(ifft2(k2 .* f_fft)) + ...
     Para.alpha * Para.epsilon * (u - Para.m);
 
 end

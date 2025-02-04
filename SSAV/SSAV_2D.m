@@ -85,8 +85,8 @@ Eu = zeros(1, nmax);
 Eu_SSAV = zeros(1, nmax);
 % Eu_SSAV_test = zeros(1, nmax);
 t_vals = zeros(1, nmax);
-% uu = cell(101, 1);
-% uu{1} = u;
+uu = cell(101, 1);
+uu{1} = u;
 
 Eu(1) = compute_En(u, w_old);
 % Eu_SSAV_test(1) = (Eu(1))/2 + (compute_En(2*u - u, 2*w_old - w_old)) / 2 + ...
@@ -148,14 +148,15 @@ E_old = Eu(1);       E = Eu(2);       t_vals(2) = t;
 
 j = 1;
 
+dt_new = dt;
 
 while t < Time.tf
 
     j = j + 1;
 
-    dt_new = dt;
+    % dt_new = dt;
     
-    t = t + dt_new;
+    % t = t + dt_new;
 
     [u_new, w_new, gamma] = compute_unew(u, u_old, w, w_old, ...
         dt, dt_new);
@@ -170,13 +171,15 @@ while t < Time.tf
 
     rel_err = abs(E_new - E_mod);
 
-    adap = 0.5*dt*(Para.err_tol / rel_err);
+    adap = 0.9*dt_new*(Para.err_tol / rel_err);
 
-    dt_new = max(Time.dt_min, min(adap, Time.dt_max));
+    % dt_new = max(Time.dt_min, min(adap, Time.dt_max));
 
     l = 1;
 
-    while (rel_err > Para.err_tol) && (dt_new ~= Time.dt_min)
+    while ((rel_err > Para.err_tol) && (dt_new ~= Time.dt_min)) && (l < 10)
+
+        dt_new = max(Time.dt_min, min(adap, Time.dt_max));
 
         [u_new, w_new, gamma] = compute_unew(u, u_old, w, w_old, ...
             dt, dt_new);
@@ -189,19 +192,22 @@ while t < Time.tf
     
         rel_err = abs(E_new - E_mod);
 
-        adap = 0.5*dt*(Para.err_tol / rel_err);
+        adap = 0.9*dt_new*(Para.err_tol / rel_err);
 
-        dt_new = max(Time.dt_min, min(adap, Time.dt_max));
+        % dt_new = max(Time.dt_min, min(adap, Time.dt_max));
 
         l = l + 1;
 
         if l == 10
-            dt_new = Time.dt_min;
+            dt_new = 0.5*dt_new;
         end
     end
 
     % compute new time step
     dt = dt_new;
+    dt_new = max(Time.dt_min, min(adap, Time.dt_max));
+
+    t = t + dt;
  
     Eu(j + 1) = E_new;
 
