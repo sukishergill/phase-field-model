@@ -1,5 +1,5 @@
-function [uu, u_times, Eu, Eu_SSAV, Em, mass, t_vals, num_fft]...
-    = SSAV_2D (Grid, Time, Para, u, model)
+function [uu, u_times, Eu, Eu_SSAV, Em, mass, t_vals, l_vals, num_fft]...
+    = SSAV_2D(Grid, Time, Para, u, model)
 
 % This function solves the following PDE
 %
@@ -84,6 +84,7 @@ Em = Grid.Lx*Grid.Ly * compute_F(Para.m);
 Eu = zeros(1, nmax); 
 Eu_SSAV = zeros(1, nmax);
 t_vals = zeros(1, nmax);
+l_vals = zeros(1, nmax);
 uu = cell(101, 1);
 uu{1} = u;
 u_times = zeros(1, 101);
@@ -93,9 +94,9 @@ Eu(1) = compute_En(u, w_old);
 H = compute_H(f, w_old);
 
 r = -0.5 * sum(H.*u, 'all') * Grid.dx*Grid.dy + w_old;
-H2 = fft2(H);   num_fft = num_fft + 1;
+H2 = fft2(H);           num_fft = num_fft + 1;
 
-ufft = fft2(u); num_fft = num_fft + 1;
+ufft = fft2(u);         num_fft = num_fft + 1;
 
 r_tilde = u/dt - Para.S*real(ifft2(G .* ufft)) - r*real(ifft2(G .* H2));
 
@@ -163,38 +164,43 @@ while t < Time.tf
     E_mod = E_new/2 + (compute_En(2*u_new - u, 2*w_new - w)) / 2 + ...
         sum(Para.S/2 * (u - u_old).^2, 'all')*Grid.dx*Grid.dy;
 
-    rel_err = abs(E_new - E_mod);
+    E_t = (E_new - Eu(j)) / dt_new;
 
-    A_dp = compute_Adp(rel_err, dt_new);
-
-    l = 1;
-
-    while ((rel_err > Para.err_tol) && (dt_new ~= Time.dt_min)) && (l < 10)
-
-        dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
-
-        [u_new, w_new] = compute_unew(u, u_old, w, w_old, ...
-            dt, dt_new);
-
-        E_new = compute_En(u_new, w_new);
-        
-        E_mod = E_new/2 + (compute_En(2*u_new - u, 2*w_new - w)) / 2 + ...
-            sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*Grid.dx*Grid.dy;
-    
-        rel_err = abs(E_new - E_mod);
-
-        A_dp = compute_Adp(rel_err, dt_new);
-
-        l = l + 1;
-
-        if l == 10
-            dt_new = 0.5*dt_new;
-        end
-    end
+    % rel_err = abs(E_new - E_mod);
+    % 
+    % A_dp = compute_Adp(rel_err, dt_new);
+    % 
+    % l = 1;
+    % 
+    % while ((rel_err > Para.err_tol) && (dt_new ~= Time.dt_min)) && (l < 10)
+    % 
+    %     dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
+    % 
+    %     [u_new, w_new] = compute_unew(u, u_old, w, w_old, ...
+    %         dt, dt_new);
+    % 
+    %     E_new = compute_En(u_new, w_new);
+    % 
+    %     E_mod = E_new/2 + (compute_En(2*u_new - u, 2*w_new - w)) / 2 + ...
+    %         sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*Grid.dx*Grid.dy;
+    % 
+    % 
+    %     rel_err = abs(E_new - E_mod);
+    % 
+    %     A_dp = compute_Adp(rel_err, dt_new);
+    % 
+    %     l = l + 1;
+    % 
+    %     if l == 10
+    %         dt_new = 0.5*dt_new;
+    %     end
+    % end
 
     % compute new time step
     dt = dt_new;
-    dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
+    % dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
+    % dt_new = max(Time.dt_min, Time.dt_max / sqrt(1 + 550 * abs(E_t)^2));
+    dt_new = max(Time.dt_min, Time.dt_max / sqrt(1 + 1000/dt * abs(E_new - E_mod)));
 
     t = t + dt;
  
@@ -203,6 +209,8 @@ while t < Time.tf
     Eu_SSAV(j) = (Eu(j+1))/2 + (compute_En(2*u_new - u, 2*w_new - w)) / 2 + ...
         sum(sum(Para.S/2 * (u(:) - u_old(:)).^2))*Grid.dx*Grid.dy;
 
+    % l_vals(j) = l;
+
     w_old = w;                      w = w_new;
     u_old = u;                      u = u_new;
 
@@ -210,6 +218,7 @@ while t < Time.tf
 
         uu{plt_idx} = u;
         u_times(plt_idx) = t;
+        mass(plt_idx) = (sum(u(:))*Grid.dx*Grid.dy)/(Grid.Lx*Grid.Ly);
         plt_idx = plt_idx + 1;
         
     end
@@ -223,6 +232,7 @@ if Time.dt_max ~= Time.dt_min
     nt = sum(t_vals > 0) + 1;
     Eu = Eu(1:nt);
     Eu_SSAV = Eu_SSAV(1:nt);
+    l_vals = l_vals(1:nt);
     t_vals = t_vals(1:nt);
 
 end
@@ -303,7 +313,7 @@ u = fft2(u);        num_fft = num_fft + 1;
 
 if model == 2
 
-    du = D.*u;
+    du = real(ifft2(D.*u));
 else
 
     ux = real(ifft2(-1i*Grid.kxx.*u));         
