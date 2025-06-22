@@ -24,13 +24,13 @@ H_snew = SSAV_helpers.compute_H(f, w_snew);
 % define P for BDF2    
 P = a + P1;
 
-r_hat = fft2(r_hat);        %num_fft_out = num_fft_out + 1;
+r_hat = fftn(r_hat);        %num_fft_out = num_fft_out + 1;
 psi_r = P .\ r_hat;
-psi_r = real(ifft2(psi_r));
+psi_r = real(ifftn(psi_r));
 
-H2 = fft2(H_snew);          %num_fft_out = num_fft_out + 1;
+H2 = fftn(H_snew);          %num_fft_out = num_fft_out + 1;
 psi_H = P .\ (G.*H2);
-psi_H = real(ifft2(psi_H));
+psi_H = real(ifftn(psi_H));
 
 innprod_Hu = SSAV_helpers.compute_ip(H_snew, psi_r, psi_H, Grid);
 

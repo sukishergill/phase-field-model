@@ -1,4 +1,4 @@
-function Results = SSAV(Grid, Time, Para, u, model)
+function Results = SSAV(Grid, Time, Para, u, model, dim)
 
 % This function solves the following PDE
 %
@@ -36,13 +36,13 @@ num_fft = 0;
 
 dt = Time.dt_min;
 
-k2 = Grid.kxx.^2 + Grid.kyy.^2;
-k4 = k2.^2;         k6 = k2.^3.;
+% k2 = Grid.kxx.^2 + Grid.kyy.^2;
+k4 = Grid.k2.^2;         k6 = Grid.k2.^3.;
 
 
 if model == 2
 
-    D = (-k2 + 1);          % PFC
+    D = (-Grid.k2 + 1);          % PFC
     
 else
     
@@ -55,7 +55,7 @@ if model == 3
     G = -1;             % AC
     
 else
-    G = -k2;          % PFC, CH and OK
+    G = -Grid.k2;          % PFC, CH and OK
     
 end    
 
@@ -86,24 +86,24 @@ Eu_SSAV = zeros(1, nmax);
 Et_vals = zeros(1, nmax);
 t_vals = zeros(1, nmax);
 l_vals = zeros(1, nmax);
-uu = cell(101, 1);
+% uu = cell(101, 1);
 % uu = cell(nmax, 1);
-uu{1} = u;
-u_times = zeros(1, 101);
+% uu{1} = u;
+% u_times = zeros(1, 101);
 
 M_vals = zeros(1, nmax); 
 
 
-u_fft = fft2(u);         num_fft = num_fft + 1;
-Eu(1) = SSAV_helpers.compute_En(u_fft, w_old, Para, Grid, D, model);
+u_fft = fftn(u);         num_fft = num_fft + 1;
+Eu(1) = SSAV_helpers.compute_En(u_fft, w_old, Para, Grid, D, model, dim);
 
 H = SSAV_helpers.compute_H(f, w_old);
 
 r = -0.5 * sum(H.*u, 'all') * prod(Grid.d) + w_old;
-H2 = fft2(H);           num_fft = num_fft + 1;
+H2 = fftn(H);           num_fft = num_fft + 1;
 
 
-r_tilde = u/dt - Para.S*real(ifft2(G .* u_fft)) - r*real(ifft2(G .* H2));
+r_tilde = u/dt - Para.S*real(ifftn(G .* u_fft)) - r*real(ifftn(G .* H2));
 
 r_hat = (Para.alpha*Para.epsilon^2*dt)/(prod(Grid.L)) * ...
     sum(r_tilde, 'all')*prod(Grid.d) + r_tilde;
@@ -120,13 +120,13 @@ end
 
 P = 1/dt + P1;
 
-r_hat = fft2(r_hat);        num_fft = num_fft + 1;
+r_hat = fftn(r_hat);        num_fft = num_fft + 1;
 psi_r = P .\ r_hat;
-psi_r = real(ifft2(psi_r));
+psi_r = real(ifftn(psi_r));
 
   
 psi_H = P .\ (G .* H2);
-psi_H = real(ifft2(psi_H));
+psi_H = real(ifftn(psi_H));
 
 
 innprod_Hu = SSAV_helpers.compute_ip(H, psi_r, psi_H, Grid);
@@ -137,17 +137,17 @@ u_old = u;
 u_old_fft = u_fft;
 
 u = 0.5*innprod_Hu * psi_H + psi_r;
-u_fft = fft2(u);        num_fft = num_fft + 1;
+u_fft = fftn(u);        num_fft = num_fft + 1;
 
 uu{2} = u;
 
 t = t + dt;
 
 
-Eu(2) = SSAV_helpers.compute_En(u_fft, w, Para, Grid, D, model);
+Eu(2) = SSAV_helpers.compute_En(u_fft, w, Para, Grid, D, model, dim);
 
 Eu_SSAV(1) = (Eu(2))/2 + (SSAV_helpers.compute_En(2*u_fft - u_old_fft, ...
-    2*w - w_old, Para, Grid, D, model)) / 2 + ...
+    2*w - w_old, Para, Grid, D, model, dim)) / 2 + ...
     sum(Para.S/2 * (u - u_old).^2, 'all')*prod(Grid.d);
 
 Et_vals(1) = (Eu(2) - Eu(1)) / dt;
@@ -170,16 +170,16 @@ while t < Time.tf
     [u_new, w_new] = SSAV_helpers.compute_unew(u, u_fft, u_old, ...
         u_old_fft, w, w_old, dt, dt_new, Para, Grid, G, P1);
 
-    u_new_fft = fft2(u_new);        num_fft = num_fft + 1;
+    u_new_fft = fftn(u_new);        num_fft = num_fft + 1;
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %%%%%%%%%%%%%%%%% Adaptive time stepping %%%%%%%%%%%%%%%%%
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    E_new = SSAV_helpers.compute_En(u_new_fft, w_new, Para, Grid, D, model);
+    E_new = SSAV_helpers.compute_En(u_new_fft, w_new, Para, Grid, D, model, dim);
 
     E_mod = E_new/2 + (SSAV_helpers.compute_En(2*u_new_fft - u_fft, ...
-        2*w_new - w, Para, Grid, D, model)) / 2 + ...
+        2*w_new - w, Para, Grid, D, model, dim)) / 2 + ...
         sum(Para.S/2 * (u_new - u).^2, 'all')*prod(Grid.d);
 
     E_t = (E_new - Eu(j)) / dt_new;
@@ -229,7 +229,7 @@ while t < Time.tf
     %     [u_new, w_new] = compute_unew(u, u_fft, u_old, u_old_fft, w, w_old, ...
     %         dt, dt_new);
     % 
-    %     u_new_fft = fft2(u_new);        num_fft = num_fft + 1;
+    %     u_new_fft = fftn(u_new);        num_fft = num_fft + 1;
     % 
     %     E_new = compute_En(u_new_fft, w_new);
     % 
@@ -264,14 +264,14 @@ while t < Time.tf
     u_old = u;                      u = u_new;
     u_old_fft = u_fft;              u_fft = u_new_fft;
 
-    if t >= plt(plt_idx)
-
-        uu{plt_idx} = u;
-        u_times(plt_idx) = t;
-        mass(plt_idx) = (sum(u, 'all')*prod(Grid.d))/(prod(Grid.L));
-        plt_idx = plt_idx + 1;
-        
-    end
+    % if t >= plt(plt_idx)
+    % 
+    %     uu{plt_idx} = u;
+    %     u_times(plt_idx) = t;
+    %     mass(plt_idx) = (sum(u, 'all')*prod(Grid.d))/(prod(Grid.L));
+    %     plt_idx = plt_idx + 1;
+    % 
+    % end
 
     t_vals(j + 1) = t;
 
@@ -299,8 +299,9 @@ if Time.dt_max ~= Time.dt_min
 end
 
 % Results.uu = uu(~cellfun('isempty', uu));
-Results.uu = uu;
-Results.u_times = u_times;
+% Results.uu = uu;
+% Results.u_times = u_times;
+Results.u = u;
 Results.Eu = Eu;
 Results.Eu_SSAV = Eu_SSAV;
 Results.Et_vals = Et_vals;
