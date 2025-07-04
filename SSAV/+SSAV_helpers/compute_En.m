@@ -10,8 +10,8 @@ um_fft = u_fft - Para.m;
 v = -Grid.inv_k .* um_fft;
 v(Grid.k == 0) = 0;
 
-vx = real(ifftn(-1i*Grid.kxx.*v));         
-vy = real(ifftn(-1i*Grid.kyy.*v));
+vx = ifftn(-1i*Grid.kxx.*v, 'symmetric');         
+vy = ifftn(-1i*Grid.kyy.*v, 'symmetric');
 
 dv = vx.^2 + vy.^2;
 
@@ -19,16 +19,16 @@ dv = vx.^2 + vy.^2;
 
 if model == 2
 
-    du = real(ifftn(D.*u_fft));
+    du = ifftn(D.*u_fft, 'symmetric');
 else
 
-    ux = real(ifftn(-1i*Grid.kxx.*u_fft));         
-    uy = real(ifftn(-1i*Grid.kyy.*u_fft));
+    ux = ifftn(-1i*Grid.kxx.*u_fft, 'symmetric');         
+    uy = ifftn(-1i*Grid.kyy.*u_fft, 'symmetric');
 
     du = ux.^2 + uy.^2;
 
     if dim == 3
-        uz = real(ifftn(-1i*Grid.kzz.*u_fft));
+        uz = ifftn(-1i*Grid.kzz.*u_fft, 'symmetric');
         du = du + uz.^2;
     end
 

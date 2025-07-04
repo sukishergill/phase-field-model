@@ -10,8 +10,8 @@ rH = fftn(r .* H_snew);
 
 % num_fft_out = num_fft_in + 1;
 
-r_tilde = -(b*u_curr + c*u_prev) - Para.S*real(ifftn(G .* u_snew_fft)) + ...
-    real(ifftn(G .* rH));
+r_tilde = -(b*u_curr + c*u_prev) - Para.S*(ifftn(G .* u_snew_fft, 'symmetric')) + ...
+    ifftn(G .* rH, 'symmetric');
 
 m_est = (Para.alpha*Para.epsilon^2)/(a*prod(Grid.L)) * ...
     sum(r_tilde, 'all') * prod(Grid.d);

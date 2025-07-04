@@ -32,6 +32,6 @@ end
 Grid.inv_k = 1./(Grid.k.^2);      Grid.inv_k(Grid.k == 0) = 1;
 
 Grid.k2 = (Grid.k).^2;
-
+Grid.k4 = (Grid.k2).^2;
 
 end

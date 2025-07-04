@@ -84,10 +84,11 @@ Em = prod(Grid.L) * SSAV_helpers.compute_F(Para.m, Para.beta);
 Eu = zeros(1, nmax); 
 Eu_SSAV = zeros(1, nmax);
 Et_vals = zeros(1, nmax);
+Ett_vals = zeros(1, nmax);
 t_vals = zeros(1, nmax);
 l_vals = zeros(1, nmax);
 % uu = cell(101, 1);
-% uu = cell(nmax, 1);
+uu = cell(nmax, 1);
 % uu{1} = u;
 % u_times = zeros(1, 101);
 
@@ -103,7 +104,8 @@ r = -0.5 * sum(H.*u, 'all') * prod(Grid.d) + w_old;
 H2 = fftn(H);           num_fft = num_fft + 1;
 
 
-r_tilde = u/dt - Para.S*real(ifftn(G .* u_fft)) - r*real(ifftn(G .* H2));
+r_tilde = u/dt - Para.S*(ifftn(G .* u_fft, 'symmetric')) - ...
+    r*(ifftn(G .* H2, 'symmetric'));
 
 r_hat = (Para.alpha*Para.epsilon^2*dt)/(prod(Grid.L)) * ...
     sum(r_tilde, 'all')*prod(Grid.d) + r_tilde;
@@ -122,11 +124,11 @@ P = 1/dt + P1;
 
 r_hat = fftn(r_hat);        num_fft = num_fft + 1;
 psi_r = P .\ r_hat;
-psi_r = real(ifftn(psi_r));
+psi_r = ifftn(psi_r, 'symmetric');
 
   
 psi_H = P .\ (G .* H2);
-psi_H = real(ifftn(psi_H));
+psi_H = ifftn(psi_H, 'symmetric');
 
 
 innprod_Hu = SSAV_helpers.compute_ip(H, psi_r, psi_H, Grid);
@@ -138,6 +140,16 @@ u_old_fft = u_fft;
 
 u = 0.5*innprod_Hu * psi_H + psi_r;
 u_fft = fftn(u);        num_fft = num_fft + 1;
+
+if Time.adap == 1
+
+    F_tilde_old = SSAV_helpers.compute_F_tilde(u_old, u_old_fft, f, Grid, Para);
+
+    [~, f] = SSAV_helpers.compute_F(u, Para.beta);
+    F_tilde = SSAV_helpers.compute_F_tilde(u, u_fft, f, Grid, Para);
+
+end
+
 
 uu{2} = u;
 
@@ -153,6 +165,8 @@ Eu_SSAV(1) = (Eu(2))/2 + (SSAV_helpers.compute_En(2*u_fft - u_old_fft, ...
 Et_vals(1) = (Eu(2) - Eu(1)) / dt;
 
 t_vals(2) = t;
+
+E_old = Eu(1);      E = Eu(2);
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -183,22 +197,104 @@ while t < Time.tf
         sum(Para.S/2 * (u_new - u).^2, 'all')*prod(Grid.d);
 
     E_t = (E_new - Eu(j)) / dt_new;
+    E_tt = (E_new - 2*E + E_old)/(dt_new^2);
 
-    Et_vals(j) = E_t;
+    M_vals(j) = sqrt(1 + Para.sigma*(2*abs(E_new - E_mod)/dt)^(Para.p));
 
-    M_vals(j) = sqrt(1 + 2* Para.sigma /dt * (E_new - E_mod)^2);
 
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %%%%%%%%%%%%%%%%% Adaptive time stepping %%%%%%%%%%%%%%%%%
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     if Time.adap < 3
 
         if Time.adap == 1
+
+            [~, f] = SSAV_helpers.compute_F(u_new, Para.beta);
             
-            rel_err = SSAV_helpers.compute_rel_err(u, u_p);
+            F_tilde_new = SSAV_helpers.compute_F_tilde(u_new, u_new_fft, ...
+                f, Grid, Para);
+
+            u_p = SSAV_helpers.AM3_up(u, dt_new/dt, dt_new, F_tilde_old, ...
+                F_tilde, F_tilde_new);
+            
+            rel_err = sum((u_new - u_p).^2, 'all') / sum((u_p).^2, 'all');
+
+            A_dp = SSAV_helpers.compute_Adp(rel_err, dt_new, Para); 
+
+            l = 1;
+
+            while (rel_err > Para.err_tol) && (dt_new ~= Time.dt_min) && (l < 10)
+
+                dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
+                [u_new, w_new] = SSAV_helpers.compute_unew(u, u_fft, ...
+                    u_old, u_old_fft, w, w_old, dt, dt_new, Para, ...
+                    Grid, G, P1);
+
+                u_new_fft = fftn(u_new);
+
+                [~, f] = SSAV_helpers.compute_F(u_new, Para.beta);
+
+                F_tilde_new = SSAV_helpers.compute_F_tilde(u_new,...
+                    u_new_fft, f, Grid, Para);
+
+                u_p = SSAV_helpers.AM3_up(u, dt_new/dt, dt_new, ...
+                    F_tilde_old, F_tilde, F_tilde_new);
+
+                rel_err = sum((u_new - u_p).^2, 'all') / sum((u_p).^2, 'all');
+
+                A_dp = SSAV_helpers.compute_Adp(rel_err, dt_new, Para); 
+
+                l = l + 1;
+
+                if l == 10
+                    dt_new = 0.5*dt_new;
+                end
+
+            end
+
 
         else
 
             rel_err = abs(E_new - E_mod);
 
+            A_dp = SSAV_helpers.compute_Adp(rel_err, dt_new, Para);
+            
+            l = 1;
+
+            while (rel_err > Para.err_tol) && (dt_new ~= Time.dt_min) && (l < 10)
+
+                dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
+                [u_new, w_new] = SSAV_helpers.compute_unew(u, u_fft, ...
+                    u_old, u_old_fft, w, w_old, dt, dt_new, Para, ...
+                    Grid, G, P1);
+
+                u_new_fft = fftn(u_new);
+
+                E_new = SSAV_helpers.compute_En(u_new_fft, w_new, Para, Grid, D, model, dim);
+
+                E_mod = E_new/2 + (SSAV_helpers.compute_En(2*u_new_fft ...
+                    - u_fft, 2*w_new - w, Para, Grid, D, model, dim)) ...
+                    / 2 + sum(Para.S/2 * (u_new - u).^2, 'all')*prod(Grid.d);
+
+                rel_err = abs(E_new - E_mod);
+
+                A_dp = SSAV_helpers.compute_Adp(rel_err, dt_new, Para);
+                
+                l = l + 1;
+
+                if l == 10
+                    dt_new = 0.5*dt_new;
+                end
+            end
+
         end
+
+        E_t = (E_new - Eu(j)) / dt_new;
+        E_tt = (E_new - 2*E + E_old)/(dt_new^2);
+
+        dt = dt_new;
+        dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
+
     else
         dt = dt_new;
 
@@ -209,57 +305,27 @@ while t < Time.tf
 
         else
            
-            dt_new = max(Time.dt_min, Time.dt_max / ...
-                sqrt(1 + Para.sigma*(2*abs(E_new - E_mod)/dt)^(Para.p)));
+            dt_new = max(Time.dt_min, Time.dt_max / M_vals(j));
         end
     end
 
 
-
-    % rel_err = abs(E_new - E_mod);
-    % 
-    % A_dp = compute_Adp(rel_err, dt_new);
-    % 
-    % l = 1;
-    % 
-    % while ((rel_err > Para.err_tol) && (dt_new ~= Time.dt_min)) && (l < 10)
-    % 
-    %     dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
-    % 
-    %     [u_new, w_new] = compute_unew(u, u_fft, u_old, u_old_fft, w, w_old, ...
-    %         dt, dt_new);
-    % 
-    %     u_new_fft = fftn(u_new);        num_fft = num_fft + 1;
-    % 
-    %     E_new = compute_En(u_new_fft, w_new);
-    % 
-    %     E_mod = E_new/2 + (compute_En(2*u_new_fft - u_fft, 2*w_new - w)) / 2 + ...
-    %         sum(Para.S/2 * (u_new - u).^2, 'all')*Grid.dx*Grid.dy;
-    % 
-    %     rel_err = abs(E_new - E_mod);
-    % 
-    %     A_dp = compute_Adp(rel_err, dt_new);
-    % 
-    %     l = l + 1;
-    % 
-    %     if l == 10
-    %         dt_new = 0.5*dt_new;
-    %     end
-    % end
-
     % compute new time step
-    dt = dt_new;
+    % dt = dt_new;
     % dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
     % dt_new = max(Time.dt_min, Time.dt_max / sqrt(1 + Para.sigma * abs(E_t)^2));
-    dt_new = max(Time.dt_min, Time.dt_max / ...
-        sqrt(1 + Para.sigma*(2*abs(E_new - E_mod)/dt)^(Para.p)));
+    % dt_new = max(Time.dt_min, Time.dt_max / ...
+    %     sqrt(1 + Para.sigma*(2*abs(E_new - E_mod)/dt)^(Para.p)));
 
     t = t + dt;
  
     Eu(j + 1) = E_new;
-
     Eu_SSAV(j) = E_mod;
+    Et_vals(j) = E_t;
+    Ett_vals(j) = E_tt;
+    uu{j+1} = u_new;
 
+    E_old = E;                      E = E_new;
     w_old = w;                      w = w_new;
     u_old = u;                      u = u_new;
     u_old_fft = u_fft;              u_fft = u_new_fft;
@@ -293,18 +359,21 @@ if Time.dt_max ~= Time.dt_min
     Eu = Eu(1:nt);
     Eu_SSAV = Eu_SSAV(1:nt);
     Et_vals = Et_vals(1:nt);
+    Ett_vals = Ett_vals(1:nt);
     l_vals = l_vals(1:nt);
     t_vals = t_vals(1:nt);
+    M_vals = M_vals(1:nt);
 
 end
 
-% Results.uu = uu(~cellfun('isempty', uu));
+Results.uu = uu(~cellfun('isempty', uu));
 % Results.uu = uu;
 % Results.u_times = u_times;
 Results.u = u;
 Results.Eu = Eu;
 Results.Eu_SSAV = Eu_SSAV;
 Results.Et_vals = Et_vals;
+Results.Ett_vals = Ett_vals;
 Results.Em = Em;
 Results.mass = mass;
 Results.t_vals = t_vals;

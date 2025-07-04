@@ -26,11 +26,11 @@ P = a + P1;
 
 r_hat = fftn(r_hat);        %num_fft_out = num_fft_out + 1;
 psi_r = P .\ r_hat;
-psi_r = real(ifftn(psi_r));
+psi_r = ifftn(psi_r, 'symmetric');
 
 H2 = fftn(H_snew);          %num_fft_out = num_fft_out + 1;
 psi_H = P .\ (G.*H2);
-psi_H = real(ifftn(psi_H));
+psi_H = ifftn(psi_H, 'symmetric');
 
 innprod_Hu = SSAV_helpers.compute_ip(H_snew, psi_r, psi_H, Grid);
 
