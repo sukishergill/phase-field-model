@@ -84,12 +84,12 @@ Em = prod(Grid.L) * SSAV_helpers.compute_F(Para.m, Para.beta);
 Eu = zeros(1, nmax); 
 Eu_SSAV = zeros(1, nmax);
 Et_vals = zeros(1, nmax);
-Ett_vals = zeros(1, nmax);
+% Ett_vals = zeros(1, nmax);
 t_vals = zeros(1, nmax);
 l_vals = zeros(1, nmax);
 % uu = cell(101, 1);
 uu = cell(nmax, 1);
-% uu{1} = u;
+uu{1} = u;
 % u_times = zeros(1, 101);
 
 M_vals = zeros(1, nmax); 
@@ -143,10 +143,12 @@ u_fft = fftn(u);        num_fft = num_fft + 1;
 
 if Time.adap == 1
 
-    F_tilde_old = SSAV_helpers.compute_F_tilde(u_old, u_old_fft, f, Grid, Para);
-
+    [F_tilde_old, num_fft] = SSAV_helpers.compute_F_tilde(u_old, ...
+        u_old_fft, f, Grid, Para, num_fft);
+    
     [~, f] = SSAV_helpers.compute_F(u, Para.beta);
-    F_tilde = SSAV_helpers.compute_F_tilde(u, u_fft, f, Grid, Para);
+    [F_tilde, num_fft] = SSAV_helpers.compute_F_tilde(u, u_fft, f, Grid,...
+        Para, num_fft);
 
 end
 
@@ -181,8 +183,8 @@ while t < Time.tf
 
     j = j + 1;
 
-    [u_new, w_new] = SSAV_helpers.compute_unew(u, u_fft, u_old, ...
-        u_old_fft, w, w_old, dt, dt_new, Para, Grid, G, P1);
+    [u_new, w_new, num_fft] = SSAV_helpers.compute_unew(u, u_fft, u_old, ...
+        u_old_fft, w, w_old, dt, dt_new, Para, Grid, G, P1, num_fft);
 
     u_new_fft = fftn(u_new);        num_fft = num_fft + 1;
 
@@ -197,9 +199,9 @@ while t < Time.tf
         sum(Para.S/2 * (u_new - u).^2, 'all')*prod(Grid.d);
 
     E_t = (E_new - Eu(j)) / dt_new;
-    E_tt = (E_new - 2*E + E_old)/(dt_new^2);
+    % E_tt = (E_new - 2*E + E_old)/(dt_new^2);
 
-    M_vals(j) = sqrt(1 + Para.sigma*(2*abs(E_new - E_mod)/dt)^(Para.p));
+    M_vals(j) = sqrt(1 + Para.sigma*(2*abs(E_new - E_mod)/dt_new)^(Para.p));
 
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -211,8 +213,8 @@ while t < Time.tf
 
             [~, f] = SSAV_helpers.compute_F(u_new, Para.beta);
             
-            F_tilde_new = SSAV_helpers.compute_F_tilde(u_new, u_new_fft, ...
-                f, Grid, Para);
+            [F_tilde_new, num_fft] = SSAV_helpers.compute_F_tilde(u_new, ...
+                u_new_fft, f, Grid, Para, num_fft);
 
             u_p = SSAV_helpers.AM3_up(u, dt_new/dt, dt_new, F_tilde_old, ...
                 F_tilde, F_tilde_new);
@@ -226,16 +228,16 @@ while t < Time.tf
             while (rel_err > Para.err_tol) && (dt_new ~= Time.dt_min) && (l < 10)
 
                 dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
-                [u_new, w_new] = SSAV_helpers.compute_unew(u, u_fft, ...
+                [u_new, w_new, num_fft] = SSAV_helpers.compute_unew(u, u_fft, ...
                     u_old, u_old_fft, w, w_old, dt, dt_new, Para, ...
-                    Grid, G, P1);
+                    Grid, G, P1, num_fft);
 
-                u_new_fft = fftn(u_new);
+                u_new_fft = fftn(u_new);        num_fft = num_fft + 1;
 
                 [~, f] = SSAV_helpers.compute_F(u_new, Para.beta);
 
-                F_tilde_new = SSAV_helpers.compute_F_tilde(u_new,...
-                    u_new_fft, f, Grid, Para);
+                [F_tilde_new, num_fft] = SSAV_helpers.compute_F_tilde(u_new,...
+                    u_new_fft, f, Grid, Para, num_fft);
 
                 u_p = SSAV_helpers.AM3_up(u, dt_new/dt, dt_new, ...
                     F_tilde_old, F_tilde, F_tilde_new);
@@ -264,11 +266,11 @@ while t < Time.tf
             while (rel_err > Para.err_tol) && (dt_new ~= Time.dt_min) && (l < 10)
 
                 dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
-                [u_new, w_new] = SSAV_helpers.compute_unew(u, u_fft, ...
+                [u_new, w_new, num_fft] = SSAV_helpers.compute_unew(u, u_fft, ...
                     u_old, u_old_fft, w, w_old, dt, dt_new, Para, ...
-                    Grid, G, P1);
+                    Grid, G, P1, num_fft);
 
-                u_new_fft = fftn(u_new);
+                u_new_fft = fftn(u_new);        num_fft = num_fft + 1;
 
                 E_new = SSAV_helpers.compute_En(u_new_fft, w_new, Para, Grid, D, model, dim);
 
@@ -290,7 +292,7 @@ while t < Time.tf
         end
 
         E_t = (E_new - Eu(j)) / dt_new;
-        E_tt = (E_new - 2*E + E_old)/(dt_new^2);
+        % E_tt = (E_new - 2*E + E_old)/(dt_new^2);
 
         dt = dt_new;
         dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
@@ -322,8 +324,8 @@ while t < Time.tf
     Eu(j + 1) = E_new;
     Eu_SSAV(j) = E_mod;
     Et_vals(j) = E_t;
-    Ett_vals(j) = E_tt;
-    uu{j+1} = u_new;
+    % Ett_vals(j) = E_tt;
+    % uu{j+1} = u_new;
 
     E_old = E;                      E = E_new;
     w_old = w;                      w = w_new;
@@ -359,21 +361,21 @@ if Time.dt_max ~= Time.dt_min
     Eu = Eu(1:nt);
     Eu_SSAV = Eu_SSAV(1:nt);
     Et_vals = Et_vals(1:nt);
-    Ett_vals = Ett_vals(1:nt);
+    % Ett_vals = Ett_vals(1:nt);
     l_vals = l_vals(1:nt);
     t_vals = t_vals(1:nt);
     M_vals = M_vals(1:nt);
 
 end
 
-Results.uu = uu(~cellfun('isempty', uu));
+% Results.uu = uu(~cellfun('isempty', uu));
 % Results.uu = uu;
 % Results.u_times = u_times;
-Results.u = u;
+Results.uu = u;
 Results.Eu = Eu;
 Results.Eu_SSAV = Eu_SSAV;
 Results.Et_vals = Et_vals;
-Results.Ett_vals = Ett_vals;
+% Results.Ett_vals = Ett_vals;
 Results.Em = Em;
 Results.mass = mass;
 Results.t_vals = t_vals;
