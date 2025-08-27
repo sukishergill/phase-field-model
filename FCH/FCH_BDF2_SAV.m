@@ -1,26 +1,10 @@
-function [ xx, yy, k, tt, uu, Eu, Em, mass] = FCH_BDF2_SAV ( nx, ny,...
-    Lx, Ly, dt, tf, epsilon, eta, B, S, u)
+function Results = FCH_BDF2_SAV(Grid, Time, Para, u)
 
-% FCH BDF2 SAV
-%
-% This function solves the functionalized Cahn-Hilliard energy using the
-% BDF2-SAV scheme
-
-% spatial grid
-dx = Lx/nx;                         dy = Ly/ny;
-x = Lx*(1:nx)' / nx - Lx/2;         y = Ly*(1:ny)' / ny - Ly/2;
-[xx, yy] = meshgrid(x, y);
-
-kx = [ 0:nx/2-1, 0.0, -nx/2+1:-1]' / (Lx/pi/2);
-ky = [ 0:ny/2-1, 0.0, -ny/2+1:-1]' / (Ly/pi/2);
-
-[kxx,kyy] = meshgrid(kx, ky);
-k = sqrt(kxx.^2 + kyy.^2);
-% k = k(:);
+dt = Time.dt;
 
 % define number of time steps and time steps for plotting purposes
-nmax = round(tf / dt);
-nplt = floor( (tf / 100) / dt);
+nmax = round(Time.tf / dt);
+nplt = floor( (Time.tf / 100) / dt);
 tt = zeros(1, 101);
 tt(1) = 0;
 
@@ -28,7 +12,7 @@ uu = cell(101, 1);
 uu{1} = u;
 
 mass = zeros(1, 101);
-mass(1) = mean(u(:));
+mass(1) = (sum(u, 'all')*prod(Grid.d))/(prod(Grid.L));
 
 Eu = zeros(1, 101);
 
@@ -36,49 +20,44 @@ Eu = zeros(1, 101);
 %%%%%%%% Compute u^1 using backward Euler %%%%%%%% 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-[F, f, fp] = compute_F(u);
+[Wq, Wq1, Wq2] = SSAV_FCH_helpers.compute_Wq(u, Para);
 
-G = compute_G(u, epsilon, eta, F, f, kxx, kyy, dx, dy, nx, ny, x, y);
+G = SSAV_FCH_helpers.compute_G(u, Para, Wq, Wq1, Grid);
 
-w_old = compute_w(G, B);
+w_old = SSAV_FCH_helpers.compute_w(G, Para.B);
 
-Eu(1) = compute_E(u, w_old, epsilon, eta, B, dy, dy, k, kxx, kyy, nx, ny);
+Eu(1) = SSAV_FCH_helpers.compute_E(u, w_old, Para, Grid);
 
-H = compute_H(u, w_old, epsilon, eta, f, fp, x, y, xx, yy, nx, ny, kxx, kyy, k);
+H = SSAV_FCH_helpers.compute_H(u, w_old, Para, Wq1, Wq2, Grid);
 H_old = H;
 
-r = w_old - 0.5 * sum(sum(H.*u))*dx*dy;
+r = w_old - 0.5 * sum(sum(H.*u))*prod(Grid.d);
 
+H2 = fftn(H);
 
-H2 = fft2(H);
+v = fftn(u);
 
-v = fft2(u);
+r_hat = u/dt + (Para.epsilon^2*(2 + Para.eta1 + Para.tau^2/3) + Para.S) * ...
+    real(ifftn(Grid.k4 .* v)) + r * real(ifftn(-Grid.k2 .* H));
 
-r_hat = u/dt + (epsilon^2*(2 + eta) + S) * ...
-    real(ifft2(k.^4 .* v)) + ...
-    r * real(ifft2(-k.^2 .* H));
+% define linear operator P for BDF1
+P = 1/dt + Para.epsilon^4 * Grid.k6 + Para.S * Grid.k4;
 
+r_hat = fftn(r_hat);
+psi_r = P .\ r_hat;         psi_r = ifftn(psi_r, 'symmetric');
 
-% define linear operator for BDF1
-P = spdiags(1/dt + epsilon^4*k(:).^6 + S*k(:).^4, 0, nx*ny, nx*ny);
+psi_H = P .\ (G .* H2);     psi_H = ifftn(psi_H, 'symmetric');
 
-r_hat = fft2(r_hat);
-psi_r = P \ r_hat(:);
-psi_r = real(ifft2(reshape(psi_r, nx, ny)));
-
-psi_H = P \ (-k(:).^2 .* H2(:));         
-psi_H = real(ifft2(reshape(psi_H, nx, ny)));
-
-innprod_Hu = compute_ip(H, psi_r, psi_H, dx, dy, x, y);
+innprod_Hu = SSAV_FCH_helpers.compute_ip(H, psi_r, psi_H, prod(Grid.d));
 
 w = innprod_Hu + r;
 
 u_old = u;
 
-u = 0.5*innprod_Hu * psi_H + psi_r;
+u = 0.5 * innprod_Hu * psi_H + psi_r;
 
-% define P for BDF2
-P = spdiags(3/(2*dt) + epsilon^4*k(:).^6 + S*k(:).^4, 0, nx*ny, nx*ny);
+% define linear operator P for BDF2
+P = P + 1/(2*dt);
 
 if nplt == 1
     
@@ -88,62 +67,50 @@ if nplt == 1
 
     w_vals(2) = w;
     
-    Eu(2) = compute_E(u, w, epsilon, eta, B, dx, dy, k, kxx, kyy, nx, ny);
+    Eu(2) = SSAV_FCH_helpers.compute_E(u, w, Para, Grid);
     
-    mass(2) = mean(u(:));
+    mass(2) = (sum(u, 'all')*prod(Grid.d))/(prod(Grid.L));
     
 end
-
-[Fm, fm, fpm] = compute_F(mass(1));
-
-Em = 0.5*fm^2 - eta*Fm;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%% Main time loop %%%%%%%%%%%%%%%%% 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
 for j = 2 : nmax
 
     t = j * dt;
 
-    u_snew = compute_u_snew(u, u_old);
+    u_snew = SSAV_FCH_helpers.compute_u_snew(u, u_old);
 
-    [F, f, fp] = compute_F(u_snew);
+    [Wq, Wq1, Wq2] = SSAV_FCH_helpers.compute_Wq(u_snew, Para);
 
-    G = compute_G(u_snew, epsilon, eta, F, f, kxx, kyy, dx, dy, nx, ny, x, y);
+    G = SSAV_FCH_helpers.compute_G(u, Para, Wq, Wq1, Grid);
 
-    w_snew = compute_w(G, B);
+    w_snew = SSAV_FCH_helpers.compute_w(G, Para.B);
 
-    H_snew = compute_H(u_snew, w_snew, epsilon, eta, f, fp, x, y,...
-        xx, yy, nx, ny, kxx, kyy, k);
+    H_snew = SSAV_FCH_helpers.compute_H(u_snew, w_snew, Para, Wq1, Wq2,...
+        Grid);
 
-    % H_1 = compute_H(u, w, epsilon, eta, f, fp, x, y, xx, yy, nx, ny, k);
-
-    % H_snew = 2*H_1 - H_old;
-
-    % H_old = H_1;
-
-    H = fft2(H_snew);
-    u_snew = fft2(u_snew);
+    H = fftn(H_snew);
+    u_snew = fftn(u_snew);
 
     r = (4*w - w_old)/3 - 0.5 * sum(sum(H_snew .* (4*u - u_old)/3)) ...
-        * dx*dy;
+        * prod(Grid.d);
 
+    r_hat = (4*u - u_old)/(2*dt) + (Para.epsilon^2*(2 + Para.eta1 + ...
+        2*Para.tau^2/3) + Para.S) * real(ifftn(Grid.k4 .* u_snew)) + ...
+        r * real(ifftn(-Grid.k2 .* H));
 
-    r_hat = (4*u - u_old)/(2*dt) + (epsilon^2*(2 + eta) + S) * ...
-        real(ifft2(k.^4 .* u_snew)) + ...
-        r * real(ifft2(-k.^2 .* H));
+    r_hat = fftn(r_hat);
 
-    r_hat = fft2(r_hat);    
-    
-    psi_r = P \ r_hat(:);           psi_r = reshape(psi_r, nx, ny);
-    psi_r = real(ifft2(psi_r));
-    psi_H = P \ (-k(:).^2.*H(:));     psi_H = reshape(psi_H, nx, ny);
-    psi_H = real(ifft2(psi_H));
+    psi_r = P .\ r_hat;         psi_r = ifftn(psi_r, 'symmetric');
 
-    innprod_Hu = compute_ip(H_snew, psi_r, psi_H, dx, dy, x, y);
+    psi_H = P .\ (G .* H);     psi_H = ifftn(psi_H, 'symmetric');
 
-    w_new = 0.5*innprod_Hu + r; 
+    innprod_Hu = SSAV_FCH_helpers.compute_ip(H_snew, psi_r, psi_H, ...
+        prod(Grid.d));
+
+    w_new = 0.5*innprod_Hu + r;
 
     u_new = 0.5*innprod_Hu * psi_H + psi_r;
 
@@ -152,9 +119,9 @@ for j = 2 : nmax
 
     if (mod(j, nplt) == 0)                  
 
-        Eu(j/nplt + 1) = compute_E(u, w, epsilon, eta, B, dx, dy, k, kxx, kyy, nx, ny);
+        Eu(j/nplt + 1) = SSAV_FCH_helpers.compute_E(u, w, Para, Grid);
         
-        mass(j/nplt + 1) = mean(u(:));
+        mass(j/nplt + 1) = (sum(u, 'all')*prod(Grid.d))/(prod(Grid.L));
         
         uu{j/nplt + 1} = u;
         
@@ -165,102 +132,11 @@ for j = 2 : nmax
 
 end
 
-Eu = Eu / (Lx*Ly);
+Eu = Eu / prod(Grid.L);
 
-end
-
-function u_snew = compute_u_snew(u, u_old)
-
-u_snew = 2*u - u_old;
-
-end
-
-function [F, f, fp] = compute_F(u)
-
-F = 0.25 * (u.^2 - 1).^2;
-
-f = u.^3 - u;
-
-fp = 3 * u.^2 - 1;
-
-end
-
-function G = compute_G(u, epsilon, eta, F, f, kxx, kyy, dx, dy, nx, ny, x, y)
-
-v = fft2(u);
-
-ux = ifft2(-1i*kxx.*v);         
-uy = ifft2(-1i*kyy.*v);
-
-% [ux, uy] = gradient(u, x, y);
-
-G = sum(sum(3*epsilon^2 * u.^2 .* (ux.^2 + uy.^2) + ...
-    0.5 * f.^2 - eta * F)) *  dx*dy;
-% 
-% G = sum(sum(3*epsilon^2 * u.^2 .* real(ifftn(-1i*k.*v)).^2 + ...
-%     0.5 * f.^2 - eta * F)) *  dx*dy;
-
-
-end
-
-function w = compute_w(G, B)
-
-w = sqrt(G + B);
-
-end
-
-function H = compute_H(u, w, epsilon, eta, f, fp, x, y, xx, yy, nx, ny, kxx, kyy, k)
-
-v = fft2(u);
-v2 = fft2(u.^2);
-
-ux = real(ifft2(-1i*kxx.*v));         
-uy = real(ifft2(-1i*kyy.*v));
-
-ux2 = real(ifft2(-1i*kxx.*v2));         
-uy2 = real(ifft2(-1i*kyy.*v2));
-
-% [ux, uy] = gradient(u, x, y);
-% [ux2, uy2] = gradient(u.^2, x, y);
-
-% div_u = divergence(xx, yy, u.^2.*ux, u.^2.*uy);
-% u_div_u = u.^2 .* (divergence(xx, yy, ux, uy));
-
-% H = (6*epsilon^2 * (u.* real(ifftn(-1i*k.*v)).^2 - div_u) + f .* fp - ...
-%     eta * f) / w;
-
-u_grad1 = ux.^2 + uy.^2;
-
-H = (6*epsilon^2 * (u.* u_grad1 -  ux.*ux2 - uy.*uy2 - ...
-    u.^2 .* real(ifft2(-k.^2 .* v))) + f .* fp - eta * f) / w;
-
-% H = (6*epsilon^2 * (u.* real(ifftn(-1i*k.*v)).^2 - (u_div_u + ux.*ux2 + ...
-%     uy .* uy2)) + f .* fp - eta * f) / w;
-
-% H = (6*epsilon^2 * (u.^2 .* real(ifftn(-k.^2.*v)) -...
-%     2*u.* real(ifftn(-1i*k.*v)).^2) + f .* fp - eta * f) / w;
-
-end
-
-
-function innprod_Hu = compute_ip(H_snew, psi_r, psi_H, dx, dy, x, y)
-
-innprod_Hu = sum(sum(H_snew .* psi_r))*dx*dy / ...
-    (1 - 0.5*sum(sum(H_snew .* psi_H)) * dx*dy);
-
-
-end
-
-function E = compute_E(u, w, epsilon, eta, B, dx, dy, k, kxx, kyy, nx, ny)
-
-u = fft2(u);
-ux = real(ifft2(-1i*kxx.*u));         
-uy = real(ifft2(-1i*kyy.*u));
-
-du = ux.^2 + uy.^2;
-
-E = sum(sum(0.5*epsilon^4 * (real(ifft2(-k.^2 .* u))).^2 - ...
-    (eta/2 + 1)*epsilon^2 * du))*...
-    dx*dy + w^2 - B;
+Results.tt = tt;
+Results.Eu = Eu;
+Results.uu = uu;
+Results.mass = mass;
 
 end
