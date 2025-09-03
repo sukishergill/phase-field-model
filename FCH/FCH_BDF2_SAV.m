@@ -37,7 +37,7 @@ H2 = fftn(H);
 
 v = fftn(u);
 
-r_hat = u/dt + (Para.epsilon^2*(2 + Para.eta1 + Para.tau^2/3) + Para.S) * ...
+r_hat = u/dt + (Para.epsilon^2*(2 + Para.eta1 + 2*Para.tau^2/3) + Para.S) * ...
     real(ifftn(Grid.k4 .* v)) + r * real(ifftn(-Grid.k2 .* H));
 
 % define linear operator P for BDF1
