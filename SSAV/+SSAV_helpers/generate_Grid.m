@@ -5,7 +5,7 @@ Grid.N = N;
 
 Grid.d = Grid.L ./ Grid.N;
 
-x = cell(dim, 1);
+Grid.x = cell(dim, 1);
 k = cell(dim, 1);
 
 for i = 1:dim
@@ -33,5 +33,6 @@ Grid.inv_k = 1./(Grid.k.^2);      Grid.inv_k(Grid.k == 0) = 1;
 
 Grid.k2 = (Grid.k).^2;
 Grid.k4 = (Grid.k2).^2;
+Grid.k6 = (Grid.k2).^3;
 
 end

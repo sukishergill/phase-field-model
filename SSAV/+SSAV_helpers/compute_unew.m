@@ -16,8 +16,10 @@ H_snew = SSAV_helpers.compute_H(f, w_snew);
 
 [a, b, c] =  SSAV_helpers.compute_dt_coeffs(dt, dt_new);
 
-[r, r_hat, num_fft] = SSAV_helpers.compute_r(2*u_curr_fft - u_prev_fft, u_curr,...
-    u_prev, w_curr, w_prev, H_snew, dt_new, a, b, c, Grid, Para, G, num_fft);
+H2 = fftn(H_snew);          num_fft = num_fft + 1;
+
+[r, r_hat] = SSAV_helpers.compute_r(2*u_curr_fft - u_prev_fft, u_curr,...
+    u_prev, w_curr, w_prev, H_snew, H2, dt_new, a, b, c, Grid, Para, G);
 
 % define P for BDF2    
 P = a + P1;
@@ -26,7 +28,7 @@ r_hat = fftn(r_hat);        num_fft = num_fft + 1;
 psi_r = P .\ r_hat;
 psi_r = ifftn(psi_r, 'symmetric');
 
-H2 = fftn(H_snew);          num_fft = num_fft + 1;
+% H2 = fftn(H_snew);          num_fft = num_fft + 1;
 psi_H = P .\ (G.*H2);
 psi_H = ifftn(psi_H, 'symmetric');
 
