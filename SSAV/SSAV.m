@@ -64,7 +64,7 @@ else
     
 end    
 
-nmax = round(Time.tf / Time.dt_min)/10;
+nmax = round(Time.tf / Time.dt_min);
 
 plt = linspace(0, Time.tf, plt_save + 1);
 plt_idx = 2;
@@ -117,7 +117,7 @@ u_ttt_vals = cell(3, 1);
 % u_times = zeros(1, 101);
 
 if save_u == 0
-    uu = cell(9, 1);
+    uu = cell(plt_save, 1);
     uu{1} = u;
 
     for i = 2:plt_save + 1
@@ -136,9 +136,11 @@ H = SSAV_helpers.compute_H(f, w_old);
 r = -0.5 * sum(H.*u, 'all') * prod(Grid.d) + w_old;
 H2 = fftn(H);           num_fft = num_fft + 1;
 
+forcing = SSAV_helpers.compute_forcing(Para.epsilon, Grid.xx, Grid.yy, dt);
+
 
 r_tilde = u/dt - Para.S*(ifftn(G .* u_fft, 'symmetric')) - ...
-    r*(ifftn(G .* H2, 'symmetric'));
+    r*(ifftn(G .* H2, 'symmetric')) + forcing;
 
 r_hat = (Para.alpha*Para.epsilon^2*dt)/(prod(Grid.L)) * ...
     sum(r_tilde, 'all')*prod(Grid.d) + r_tilde;
@@ -152,6 +154,7 @@ else
     P1 = Para.alpha*Para.epsilon^2 - Para.S*G + Para.epsilon^2*G.*D.^2;
 
 end
+
 
 P = 1/dt + P1;
 
@@ -237,7 +240,7 @@ while t < Time.tf
     dt_vals(j) = dt_new;
 
     [u_new, w_new, num_fft] = SSAV_helpers.compute_unew(u, u_fft, u_old, ...
-        u_old_fft, w, w_old, dt, dt_new, Para, Grid, G, P1, num_fft);
+        u_old_fft, w, w_old, dt, dt_new, Para, Grid, G, P1, num_fft, t);
 
     u_new_fft = fftn(u_new);        num_fft = num_fft + 1;
 
@@ -353,7 +356,7 @@ while t < Time.tf
 
             [u_new, w_new, num_fft] = SSAV_helpers.compute_unew(u, u_fft, ...
                 u_old, u_old_fft, w, w_old, dt, dt_new, Para, ...
-                Grid, G, P1, num_fft);
+                Grid, G, P1, num_fft, t);
 
             u_new_fft = fftn(u_new);        num_fft = num_fft + 1;
 
@@ -470,17 +473,17 @@ while t < Time.tf
                 end
 
                 % [dt_prop, dt_idx(j)] = min([dt_1, dt_2, dt_3, dt_4, dt_5, dt_6]);
-                dt_prop = dt_5;
-                % [dt_prop, dt_idx(j)] = min([dt_1, dt_2, dt_6]);
+                % dt_prop = dt_2;
+                [dt_prop, dt_idx(j)] = min([dt_1, dt_2]);
                 % dt_prop = dt_4;
 
             else
                 % [dt_prop, dt_idx(j)] = min([dt_1, dt_2, dt_3, Time.dt_max, ...
                 %     dt_5, Time.dt_max]);
-                % [dt_prop, dt_idx(j)] = min([dt_1, dt_2]);
+                [dt_prop, dt_idx(j)] = min([dt_1, dt_2]);
 
                 % dt_prop = Time.dt_min;
-                dt_prop = dt_5;
+                % dt_prop = dt_2;
             end
 
             % dt_prop = dt_5;
@@ -543,6 +546,12 @@ while t < Time.tf
 
     end
 
+    % if (t + dt_new) > Time.tf && Time.dt_max == Time.dt_min
+    % 
+    %     dt_new = Time.tf - t;
+    % 
+    % end
+
 end
 
 if Time.dt_max ~= Time.dt_min
@@ -572,6 +581,7 @@ end
 %     Results.uu = u;
 % end
 Results.uu = uu;
+% Results.uu = u;
 Results.u_t_vals = u_t_vals;
 Results.Eu = Eu;
 Results.Eu_SSAV = Eu_SSAV;
