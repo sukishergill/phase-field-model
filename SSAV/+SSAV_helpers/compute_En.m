@@ -31,5 +31,6 @@ else
 end
 
 E_n = sum(e *du + Para.alpha*e * dv, 'all')*prod(Grid.d) +  w^2 - Para.B;
+% E_n = sum(e *du + 0.5*Para.OK*dv, 'all')*prod(Grid.d) +  w^2 - Para.B;
 
 end

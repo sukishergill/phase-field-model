@@ -9,13 +9,13 @@ Grid.x = cell(dim, 1);
 k = cell(dim, 1);
 
 for i = 1:dim
-    x{i} = Grid.L(i)*(1:Grid.N(i))' / Grid.N(i) - Grid.L(i)/2;  
-    k{i} = [ 0:Grid.N(i)/2-1, 0.0, -Grid.N(i)/2+1:-1]' / (Grid.L(i)/pi/2);
+    Grid.x{i} = Grid.L(i)*(1:Grid.N(i))' / Grid.N(i) - Grid.L(i)/2;  
+    Grid.k{i} = [ 0:Grid.N(i)/2-1, 0.0, -Grid.N(i)/2+1:-1]' / (Grid.L(i)/pi/2);
 end
 
 if dim == 2
-    [Grid.xx, Grid.yy] = meshgrid(x{1}, x{2});
-    [Grid.kxx, Grid.kyy] = meshgrid(k{1}, k{2});
+    [Grid.xx, Grid.yy] = meshgrid(Grid.x{1}, Grid.x{2});
+    [Grid.kxx, Grid.kyy] = meshgrid(Grid.k{1}, Grid.k{2});
 
     Grid.k = sqrt(Grid.kxx.^2 + Grid.kyy.^2);
 

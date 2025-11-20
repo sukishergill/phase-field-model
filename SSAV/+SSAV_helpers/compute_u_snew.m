@@ -1,5 +1,5 @@
-function u_snew = compute_u_snew(u_curr, u_prev)
+function u_snew = compute_u_snew(u_curr, u_prev, gamma)
 
-u_snew = 2*u_curr - u_prev;
+u_snew = (gamma + 1)*u_curr - gamma*u_prev;
 
 end

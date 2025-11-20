@@ -5,10 +5,11 @@
 model = 1;
 
 Para.alpha = 0;
+Para.OK = 0;
 Para.beta = 1;
 Para.epsilon = 0.1;
-Para.err_tol = [1e-4, 1e-8, 1e-5, 1e-6, 1e-9, 1e-4];
-Para.err_tol_AM3 = 1e-6;
+Para.err_tol = [1e-3, 1e-6, 1e-5, 1e-6, 1e-9, 1e-4];
+% Para.err_tol_AM3 = 1e-6;
 % Para.err_tol = 1e-5;
 % Para.err_tol_MEE = 1e-4;
 % Para.err_tol_AMEE = 1e-8;
@@ -72,8 +73,8 @@ Grid = SSAV_helpers.generate_Grid(L, N, dim, model);
 % time discretization
 % if dt_min = dt_max BDF2 will be implemented, otherwise an adaptive time
 % stepping scheme will be used
-Time.dt_min = 1E-6;        % minimum time step
-Time.dt_max = 1E-2;        % maximum time step
+Time.dt_min = 1e-6;        % minimum time step
+Time.dt_max = 0.01;        % maximum time step
 Time.t0 = 0;    % starting time
 Time.tf = 8;    % final time
 
