@@ -92,7 +92,7 @@ Eu_sym = zeros(1, nmax);
 Et_vals = zeros(1, nmax);
 Ett_vals = zeros(1, nmax);
 t_vals = zeros(1, nmax);
-u_t_vals = zeros(1, 9);
+u_times = zeros(1, plt_save + 1);
 dt_vals = zeros(1, nmax);
 dt_idx = zeros(1, nmax);
 dt_prop_true = zeros(1, nmax);
@@ -108,6 +108,7 @@ u_ttt_pts = cell(4, 1);
 w_ttt_pts = cell(4, 1);
 w_ttt_pts{1} = w_old;
 w_ttt_vals = zeros(3,1);
+
 
 if save_u == 1
     uu = cell(nmax, 1);
@@ -138,7 +139,7 @@ H = SSAV_helpers.compute_H(f, w_old);
 r = -0.5 * sum(H.*u, 'all') * prod(Grid.d) + w_old;
 H2 = fftn(H);           num_fft = num_fft + 1;
 
-forcing = SSAV_helpers.compute_forcing(Para.epsilon, Grid.xx, Grid.yy, dt);
+% forcing = SSAV_helpers.compute_forcing(Para.epsilon, Grid.xx, Grid.yy, dt);
 
 
 r_tilde = u/dt - Para.S*(ifftn(G .* u_fft, 'symmetric')) - ...
@@ -216,7 +217,27 @@ Eu_SSAV(1) = (Eu(2))/2 + (SSAV_helpers.compute_En(2*u_fft - u_old_fft, ...
 Eu_sym(1) = (Eu(2))/2 + (SSAV_helpers.compute_En(2*u_fft - u_old_fft, ...
     2*w - w_old, Para, Grid, D, model, dim)) / 2;
 
-Et_vals(1) = (Eu(2) - Eu(1)) / dt;
+E_t = (Eu(2) - Eu(1)) / dt;
+
+if Time.adap == 5
+
+    dt_1 = Para.err_tol(1) / (abs(E_t) + Para.delta);
+
+    dt_2 = Para.err_tol(2) / sqrt(abs(E_t)+ Para.delta^2);
+
+    [dt_prop, dt_idx(1)] = min([dt_1, dt_2]);
+
+    % dt_prop = dt_1;
+
+    [min_dt, dt_prop_true(1)] = min([Time.dt_max, 2*dt, dt_prop]);
+
+    dt_new = max([Time.dt_min, min_dt, 0.1*dt]);
+
+else
+    dt_new = dt;
+end
+
+Et_vals(2) = E_t;
 
 t_vals(2) = t;
 
@@ -231,9 +252,10 @@ mass(2) = (sum(u, 'all')*prod(Grid.d))/(prod(Grid.L));
 
 j = 1;
 
-dt_new = dt;
+% dt_new = dt;
 % dt_new = 1.10*dt;
 dt_vals(1) = dt_new;
+
 
 
 while t < Time.tf
@@ -337,7 +359,39 @@ while t < Time.tf
     Et_vals(j) = E_t;
     % E_tt = (E_new - 2*E + E_old)/(dt_new^2);
 
-    M_vals(j) = sqrt(1 + Para.sigma*(2*abs(drift)/dt_new));
+    l = 0;
+    if Time.adap == 5
+    while E_t > 1e-3 && dt_new > Time.dt_min && l <= 5
+
+        dt_new = max(gamma * dt_new / 4, Time.dt_min);
+        gamma = dt_new / dt;
+
+        dt_vals(j) = dt_new;
+
+        [u_new, w_new, num_fft] = SSAV_helpers.compute_unew(u, u_fft, u_old, ...
+            u_old_fft, w, w_old, dt, dt_new, Para, Grid, G, P1, num_fft, t);
+
+        u_new_fft = fftn(u_new);        num_fft = num_fft + 1;
+
+        w_vals(j+1) = w_new;
+
+        E_new = SSAV_helpers.compute_En(u_new_fft, w_new, Para, Grid, D, model, dim);
+
+        E_mod = E_new/2 + (SSAV_helpers.compute_En(2*u_new_fft - u_fft, ...
+            2*w_new - w, Para, Grid, D, model, dim)) / 2 + ...
+            sum(Para.S/2 * (u_new - u).^2, 'all')*prod(Grid.d);
+
+        drift = abs(E_new - E_mod);
+
+        E_t = (E_new - Eu(j)) / dt_new;
+        % Et_vals(j) = E_t;
+
+        l = l + 1;
+
+    end
+    end
+
+    % M_vals(j) = sqrt(1 + Para.sigma*(2*abs(drift)/dt_new));
     % M_vals(j) = (E_new - E_mod)/dt_new;
 
 
@@ -358,6 +412,7 @@ while t < Time.tf
         while (rel_err > Para.err_tol_AM3) && (dt_new ~= Time.dt_min) && (l < 10)
             
             dt_new = max(Time.dt_min, min(A_dp, Time.dt_max));
+            gamma = dt_new / dt;
 
             [u_new, w_new, num_fft] = SSAV_helpers.compute_unew(u, u_fft, ...
                 u_old, u_old_fft, w, w_old, dt, dt_new, Para, ...
@@ -389,7 +444,7 @@ while t < Time.tf
         if Time.adap == 3
             
             dt_new = max(Time.dt_min, Time.dt_max ...
-                / sqrt(1 + Para.sigma * abs(E_t)^2));
+                / sqrt(1 + Para.sigma^2 * abs(E_t)^2));
 
         elseif Time.adap == 4
 
@@ -402,7 +457,7 @@ while t < Time.tf
             %     dt_new, dt);
             % E_tt = (Et_vals(j) - Et_vals(j-1)) / (dt_new + dt);
             E_tt = ((E_new - E)/dt_new - (E - E_old)/dt) / (dt_new + dt);
-            Ett_vals(j) = E_tt;
+            Ett_vals(j + 1) = E_tt;
 
             % u_tt = SSAV_helpers.compute_deriv2(u_new_fft, u_fft, u_old_fft, ...
             %     dt_new, dt);
@@ -414,7 +469,7 @@ while t < Time.tf
 
             dt_1 = Para.err_tol(1) / (abs(E_t) + Para.delta);
 
-            dt_2 = Para.err_tol(2) / sqrt(abs(E_t)+ Para.delta);
+            dt_2 = Para.err_tol(2) / sqrt(abs(E_t)+ Para.delta^2);
 
             % dt_1 = 2 * Para.err_tol(1) / (abs(E_t) + Para.delta);
             % 
@@ -482,9 +537,7 @@ while t < Time.tf
             %     end
 
                 % [dt_prop, dt_idx(j)] = min([dt_1, dt_2, dt_3, dt_4, dt_5, dt_6]);
-                % dt_prop = dt_2;
                 [dt_prop, dt_idx(j)] = min([dt_1, dt_2]);
-                % dt_prop = dt_4;
 
             % else
             %     % [dt_prop, dt_idx(j)] = min([dt_1, dt_2, dt_3, Time.dt_max, ...
@@ -495,7 +548,7 @@ while t < Time.tf
             %     % dt_prop = dt_2;
             % end
 
-            % dt_prop = dt_2;
+            % dt_prop = dt_1;
 
             % min_dt = dt_prop;
             [min_dt, dt_prop_true(j)] = min([Time.dt_max, 2*dt, dt_prop]);
@@ -518,15 +571,15 @@ while t < Time.tf
     t = t + dt;
  
     Eu(j + 1) = E_new;
-    Eu_SSAV(j) = E_mod;
-    Et_vals(j) = E_t;
+    Eu_SSAV(j + 1) = E_mod;
+    Et_vals(j + 1) = E_t;
     mass(j) = (sum(u_new, 'all')*prod(Grid.d))/(prod(Grid.L));
     % Ett_vals(j) = E_tt;
     if save_u == 1 
         uu{j+1} = u_new;
     end
 
-    Eu_sym(j) = 0.5*(E_new + (SSAV_helpers.compute_En(u_new_fft + ...
+    Eu_sym(j + 1) = 0.5*(E_new + (SSAV_helpers.compute_En(u_new_fft + ...
         gamma*(u_new_fft - u_fft), w_new + gamma*(w_new - w), ...
         Para, Grid, D, model, dim)));
 
@@ -538,7 +591,7 @@ while t < Time.tf
     if t >= plt(plt_idx)
 
         uu{plt_idx} = u;
-        u_t_vals(plt_idx) = t;
+        u_times(plt_idx) = t;
         % mass(plt_idx) = (sum(u, 'all')*prod(Grid.d))/(prod(Grid.L));
         plt_idx = plt_idx + 1;
 
@@ -551,6 +604,7 @@ while t < Time.tf
         dt_new = Time.tf - t;
 
         if dt_new < Time.dt_min
+            uu{end} = u_new;
             break
         end
 
@@ -592,7 +646,7 @@ end
 % end
 Results.uu = uu;
 % Results.uu = u;
-Results.u_t_vals = u_t_vals;
+Results.u_times = u_times;
 Results.Eu = Eu;
 Results.Eu_SSAV = Eu_SSAV;
 Results.Eu_sym = Eu_sym;
