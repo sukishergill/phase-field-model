@@ -19,13 +19,14 @@ N = [2^8, 2^8];
 Grid = SSAV_FCH_helpers.generate_Grid(L, N, dim);
 
 Para.B = Grid.L(1)^5;
-Para.S = 3 * Para.epsilon^2;
+% Para.S = 3*Para.epsilon^2;
+Para.S = 10;
 
 Time.dt_min = 1e-5;
-Time.dt_max = 0.001;
+Time.dt_max = 100;
 Time.dt = 0.001;
 Time.t0 = 0;
-Time.tf = 50;
+Time.tf = 1000;
 
 % Initial condition
 % 
@@ -33,17 +34,18 @@ load('FCH_IC_wave.mat');
 % u = u_filt;
 u = u(1:4:end, 1:4:end);
 
-Results = FCH_BDF2_SAV_adap_dt(Grid, Time, Para, u, 50);
+Results = FCH_BDF2_SAV_adap_dt(Grid, Time, Para, u, Time.tf/10);
 
 %%
 
 figure;
 subplot(2,1,1)
-plot(Results.t_vals(2:end), Results.Eu(2:end)/prod(L), 'Linewidth', 4)
+plot(Results.t_vals(2:end), Results.Eu(2:end), 'Linewidth', 4)
 set(gca, 'Fontsize', 40)
 xlabel('Time', 'Interpreter','latex')
 title('$E_{FCH}$', 'Interpreter','latex')
 set(gca,'TickLabelInterpreter','latex')
+xlim([0 Time.tf])
 subplot(2,1,2)
 semilogy(Results.t_vals(2:end), (Results.t_vals(2:end) - Results.t_vals(1:end-1)), 'Linewidth', 4)
 set(gca, 'Fontsize', 40)

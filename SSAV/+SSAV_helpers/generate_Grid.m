@@ -13,6 +13,14 @@ for i = 1:dim
     k{i} = [ 0:Grid.N(i)/2-1, 0.0, -Grid.N(i)/2+1:-1]' / (Grid.L(i)/pi/2);
 end
 
+if dim == 1
+
+    Grid.xx = x{1};
+    Grid.kxx = k{1};
+
+    Grid.k = sqrt(Grid.kxx.^2);
+end
+
 if dim == 2
     [Grid.xx, Grid.yy] = meshgrid(x{1}, x{2});
     [Grid.kxx, Grid.kyy] = meshgrid(k{1}, k{2});

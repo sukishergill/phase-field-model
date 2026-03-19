@@ -32,7 +32,7 @@ Grid = SSAV_FCH_helpers.generate_Grid(L, N, dim);
 
 Para.B = Grid.L(1)^5;
 Para.S = 3 * Para.epsilon^2;
-Para.S = 0;
+% Para.S = 0;
 
 Time.dt_min = 1e-5;
 Time.dt_max = 0.001;

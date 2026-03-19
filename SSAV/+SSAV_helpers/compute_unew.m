@@ -9,8 +9,8 @@ u_snew = SSAV_helpers.compute_u_snew(u_curr, u_prev, dt_new/dt);      % extrapol
 int_F = sum(F(:)) * prod(Grid.d);
 
 % w(u^{*,n+1})
-% w_snew = SSAV_helpers.compute_w(int_F, Para.B);
-w_snew = (1 + dt_new/dt)*w_curr - (dt_new/dt)*w_prev;
+w_snew = SSAV_helpers.compute_w(int_F, Para.B);
+% w_snew = (1 + dt_new/dt)*w_curr - (dt_new/dt)*w_prev;
 
 % H^{*,n+1}
 H_snew = SSAV_helpers.compute_H(f, w_snew);

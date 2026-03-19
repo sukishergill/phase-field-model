@@ -7,10 +7,20 @@ um_fft = u_fft - Para.m;
 v = -Grid.inv_k .* um_fft;
 v(Grid.k == 0) = 0;
 
-vx = ifftn(-1i*Grid.kxx.*v, 'symmetric');         
-vy = ifftn(-1i*Grid.kyy.*v, 'symmetric');
+vx = ifftn(-1i*Grid.kxx.*v, 'symmetric');  
+dv = vx.^2;
 
-dv = vx.^2 + vy.^2;
+if dim ~= 1
+    vy = ifftn(-1i*Grid.kyy.*v, 'symmetric');
+    dv = dv + vy.^2;
+
+    if dim == 3
+        vz = ifftn(-1i*Grid.kxx.*v, 'symmetric');
+        dv = dv + vz.^2;
+    end
+end
+
+% dv = vx.^2 + vy.^2;
 
 
 if model == 2
@@ -18,10 +28,17 @@ if model == 2
     du = ifftn(D.*u_fft, 'symmetric');
 else
 
-    ux = ifftn(-1i*Grid.kxx.*u_fft, 'symmetric');         
-    uy = ifftn(-1i*Grid.kyy.*u_fft, 'symmetric');
+    % if dim == 1
+    %     ux = ifftn(-1i*Grid.kxx.*u_fft, 'symmetric');  
+    %     du = ux.^2;
+    % 
+    % elseif dim == 2
+        ux = ifftn(-1i*Grid.kxx.*u_fft, 'symmetric');
+        uy = ifftn(-1i*Grid.kyy.*u_fft, 'symmetric');
 
-    du = ux.^2 + uy.^2;
+        du = ux.^2 + uy.^2;
+
+    % end
 
     if dim == 3
         uz = ifftn(-1i*Grid.kzz.*u_fft, 'symmetric');
@@ -31,6 +48,7 @@ else
 end
 
 E_n = sum(e *du + Para.alpha*e * dv, 'all')*prod(Grid.d) +  w^2 - Para.B;
+% E_n = E_n / prod(Grid.L);
 % E_n = sum(e *du + 0.5*Para.OK*dv, 'all')*prod(Grid.d) +  w^2 - Para.B;
 
 end

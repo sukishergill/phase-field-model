@@ -27,7 +27,7 @@ Time.tf = 60;
 load('FCH_IC_ellipse.mat')
 u = u(1:4:end, 1:4:end);
 
-Results = FCH_BDF2_SAV_adap_dt(Grid, Time, Para, u, 50);
+Results = FCH_BDF2_SAV_adap_dt(Grid, Time, Para, u, Time.tf);
 
 %%
 figure(1)
