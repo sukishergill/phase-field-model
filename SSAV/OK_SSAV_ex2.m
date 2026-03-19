@@ -9,12 +9,13 @@ model = 1;
 Para.alpha = 0;
 Para.beta = 1;
 Para.epsilon = 0.06;
-Para.err_tol = [1e-4, 1e-7, 1e-6, 1e-8, 1e-7, 1e-6];
-Para.err_tol_AM3 = 1e-5;
+tau = 1e-4;
+Para.err_tol = [tau, tau, 1e-6, 1e-8, 1e-7, 1e-6];
+Para.err_tol_AM3 = 1e-3;
 % Para.err_tol_MEE = 1e-5;
 % Para.err_tol_AMEE = 1e-8;
 Para.rho_s = 0.9;
-Para.sigma = 50;
+Para.sigma = 1e7;
 Para.m = 0;
 Para.M = 1;
 Para.B = 1;          % const. that ensures positive radicand
@@ -52,7 +53,8 @@ Grid = SSAV_helpers.generate_Grid(L, N, dim, model);
 % if dt_min = dt_max BDF2 will be implemented, otherwise an adaptive time
 % stepping scheme will be used
 Time.dt_min = 1E-5;        % minimum time step
-Time.dt_max = 1E-1;        % maximum time step
+Time.dt_max = Para.err_tol(2)/Para.delta;        % maximum time step
+Time.dt_max = 1;
 Time.t0 = 0;
 Time.tf = 30;
 Time.adap = 5;
@@ -67,7 +69,7 @@ u = (u-0.375)/0.125;
 
 Para.m = mean(u(:));
 
-Results = SSAV(Grid, Time, Para, u, model, dim, 0, 20);
+Results = SSAV(Grid, Time, Para, u, model, dim, 0, Time.tf);
 
 % plot_SSAV
 % plot_err
