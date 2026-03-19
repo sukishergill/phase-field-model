@@ -1,6 +1,7 @@
 % Phase-field crystal example 1
 
 % clear all;
+% rng('default')
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%% Model set up %%%%%%%%%%%%%%%%%% 
@@ -20,7 +21,7 @@ Para.B = 1;          % const. that ensures positive radicand
 Para.S = 2;          % positive stabilizing parameter S ~ ||f(u)||_\infty
 Para.p = 1;
 Para.delta = 1e-8;
-Para.err_tol = [1e-3, 1e-3, 1e-5, 1e-6, 1e-9, 1e-4];
+Para.err_tol = [1e-2, 1e-2, 1e-5, 1e-6, 1e-9, 1e-4];
 
 % spatial discretization
 dim = 3;
@@ -32,10 +33,10 @@ Grid = SSAV_helpers.generate_Grid(L, N, dim, model);
 % time discretization
 % if dt_min = dt_max BDF2 will be implemented, otherwise an adaptive time
 % stepping scheme will be used
-Time.dt_max = 10;        % minimum time step
-Time.dt_min = 0.1;        % maximum time step
+Time.dt_max = 100000;        % maximum time step
+Time.dt_min = 0.01;        % minimum time step
 Time.t0 = 0;
-Time.tf = 1000;
+Time.tf = 2000;
 Time.adap = 5;
 
 % Initial condition
@@ -46,11 +47,13 @@ Time.adap = 5;
 % u = 0.01*rand(Grid.Nx,Grid.Ny);
 % u = Para.m + u;
 % u = 0.01*rand(Grid.N(1), Grid.N(2), Grid.N(3));
-u = 0.1*rand(Grid.N(1), Grid.N(2), Grid.N(3));
+u = 0.2*rand(Grid.N(1), Grid.N(2), Grid.N(3))-0.1;
 u = Para.m + u - mean(u(:));
 % u = cos(Grid.xx).*cos(2*Grid.yy).*cos(4*Grid.zz);
 
-Results = SSAV(Grid, Time, Para, u, model, dim, 0, 10);
+
+
+Results = SSAV(Grid, Time, Para, u, model, dim, 0, Time.tf/100);
 
 % [u, Eu, Eu_SSAV, Em, mass, t_vals] = ...
 %     SSAV_2D(Grid, Time, Para, u, model);
