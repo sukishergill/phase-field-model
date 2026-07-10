@@ -110,11 +110,9 @@ def compute_F(u):
 
     return F, f
 
-def E1(u):
-    return np.sum(F(u))*dx*dy
 
-def compute_w(u, B):
-    return np.sqrt(E1(u) + B)
+def compute_w(int_F, B):
+    return np.sqrt(int_F + B)
 
 def compute_H(f, w):
     return  f / w
@@ -130,7 +128,7 @@ def compute_dt_coeffs(dt, dt_new):
 
 def compute_r(us, us_fft, u_curr, u_prev, w_curr, w_prev, Hs, H2, a, b, c, Grid, Para, G, t, dt):
 
-    r = -(b*w_curr + c*w_prev)-(b*w_curr + c*w_prev)/a + 0.5 * np.sum(H_snew * (b*u_curr + c*u_prev)/a) * np.prod(Grid.d);
+    r = -(b*w_curr + c*w_prev)-(b*w_curr + c*w_prev)/a + 0.5 * np.sum(Hs * (b*u_curr + c*u_prev)/a) * np.prod(Grid.d);
 
     r_tilde = -(b*u_curr + c*u_prev) - Para.S*np.real(ifft2(G*us_fft)) + r*np.real(ifft2(G*H2))
 
@@ -147,7 +145,7 @@ def compute_ip(Hs, psi_r, psi_H, Grid):
     return innprod_Hu
 
 
-def compute_unew(u_curr, ucurr_fft, u_prev, uprev_fft, w_curr, w_prev, dt, Para, Grid, G, P1, num_fft, t):
+def compute_unew(u_curr, ucurr_fft, u_prev, uprev_fft, w_curr, w_prev, dt, Para, Grid, G, P1, t):
 
     us = compute_us(u_curr, u_prev)
 
@@ -155,9 +153,9 @@ def compute_unew(u_curr, ucurr_fft, u_prev, uprev_fft, w_curr, w_prev, dt, Para,
 
     int_F = np.sum(F)*np.prod(Grid.d)
 
-    ws = compute_w(us, Para.B)
+    ws = compute_w(int_F, Para.B)
 
-    Hs = compute_H(f, w)
+    Hs = compute_H(f, ws)
 
     a,b,c = compute_dt_coeffs(dt, dt)
 
@@ -168,10 +166,10 @@ def compute_unew(u_curr, ucurr_fft, u_prev, uprev_fft, w_curr, w_prev, dt, Para,
     P = a + P1
 
     r_hat = fft2(r_hat)
-    psi_r = P / r_hat
+    psi_r = r_hat / P
     psi_r = np.real(ifft2(psi_r))
 
-    psi_H = P / (G*H2)
+    psi_H = (G * H2) / P
     psi_H = np.real(ifft2(psi_H))
 
     innprod_Hu = compute_ip(Hs, psi_r, psi_H, Grid)
