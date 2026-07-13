@@ -1,3 +1,5 @@
+# Define classes needed for model setup
+
 from dataclasses import dataclass
 import numpy as np
 from typing import Optional

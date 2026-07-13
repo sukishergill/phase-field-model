@@ -1,8 +1,7 @@
-#from dataclasses import dataclass
-from typing import Optional
+# This file contains helper functions for the SSAV scheme
+
 import numpy as np
 from numpy.fft import fftn, ifftn, fftfreq
-
 
 def compute_E(ufft, w, Grid, Para):
 
