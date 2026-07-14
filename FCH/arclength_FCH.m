@@ -11,7 +11,7 @@ N = 2^7;
 Grid = SSAV_FCH_helpers.generate_Grid(L, N, dim);
 
 % initialize values
-m = 0.001;         % initial m
+m = 0;         % initial m
 
 % compute u, F(u), F'(u), F''(u) to compute initial E
 % u = compute_u(Grid, m, eps);
@@ -19,28 +19,34 @@ u = Results.uu{end};
 uhat = fft(u);
 ck = uhat / N;
 
+u_vals = cell(1001,1);
+u_vals{1} = u;
+
 E = compute_E(u, uhat, eps, eta, Grid);       % initial E(u)
 
 data = [m; E];
 
-ds = 1/1000;
+ds = 1E-3;
 
 % initialize tangent vector
-t = zeros(N+1, 1);      t(1) = 1;       t(end) = 1;
+% t = zeros(N+1, 1);      t(1) = 1;       t(end) = 1;
 
-% t = initialize_t(m, 1/1000, ds, eps, eta, Grid);
+t = initialize_t(m, ds, ds, eps, eta, Grid);
 % t = rand(N+1, 1);
+% t = [dck/ds; ds];
 
 t = t / norm(t, 2);         % initial tangent vector
 
-while m < 1
+i = 2;
+
+while m<1
 
 % compute predictor
 ck_curr = ck + ds * t(1:end-1);
 m_curr = m + ds * t(end);
 u_curr = ifft(ck_curr * N, 'symmetric');
 
-% compute corrector
+compute corrector
 for j = 1:10
 
     grad = compute_RHS(gradientinit(ck_curr), u_curr, eps, eta, Grid);
@@ -49,25 +55,25 @@ for j = 1:10
 
     Fm = zeros(1, N+1);     Fm(1) = 1; Fm(end) = -1;
     G = [J(2:end,:), zeros(N-1, 1); Fm; t'];
-       
+
     b = [F_curr(2:end); ck_curr(1) - m;...
         (ck_curr - ck)'*t(1:end-1) + (m_curr - m)*t(end) - ds];
 
     dx = G \ (-b);
-    
+
     ck_new = ck_curr + dx(1:end-1);
     u_new = ifft(ck_new * N, 'symmetric');
 
     m_new = m_curr + dx(end);
     m_curr = m_new;
+    ck_curr = ck_new;
+    u_curr = u_new;
 
     % stopping criterion for Newton solver
-    if abs(m_new - m_curr) < 1e-5
+    if abs(m_new - m_curr) < 1e-5 && mean(abs(dx)) < 1e-5
         break
     end
 
-    ck_curr = ck_new;
-    u_curr = u_new;
 
 end
 
@@ -77,6 +83,8 @@ m = m_curr;
 
 E = compute_E(u, ck * N, eps, eta, Grid);
 
+u_vals{i} = u;
+i = i + 1;
 data = [data, [m_curr; E]];
 
 % update tangent
@@ -92,16 +100,20 @@ end
 
 figure;
 plot(data(1,:), data(2,:), 'Linewidth', 3)
-xlim([0, 1])
+% xlim([0, 1])
+xlabel('$m$', 'Interpreter','latex')
+ylabel('$E$', 'Interpreter', 'latex')
+set(gca, 'FontSize', 30)
+set(gca, 'TickLabelInterpreter', 'latex')
 
 
 
 function u = compute_u(Grid, m, eps)
 
-u = tanh((Grid.x + pi*(m + 1)/2) / eps) - ...
-    tanh((Grid.x - pi*(m + 1)/2) / eps) - 1;
+% u = tanh((Grid.x + pi*(m + 1)/2) / eps) - ...
+%     tanh((Grid.x - pi*(m + 1)/2) / eps) - 1;
 
-% u = m*ones(size(Grid.x));         % test case
+u = m*ones(size(Grid.x));         % test case
 
 end
 
@@ -189,7 +201,7 @@ function f = compute_RHS(ck, u, eps, eta, Grid)
 
 f = eps^4 * Grid.k4 .* ck ...
     + eps^2 * Grid.k2 .* ck .* (fft(u.^3) - 1) ...
-    + eps^2 * Grid.k2 .* ck.^1 .* (fft(3*u.^2 - 1)) ...
+    + eps^2 * Grid.k2 .* ck.^2 .* (fft(3*u.^2 - 1)) ...
     - ck .* (fft(3*u.^5 - 4*u.^3) + 1) ...
     - eta * eps^2 * Grid.k2 .* ck ...
     - eta * ck .* (fft(u.^3) - 1);
@@ -212,3 +224,11 @@ dFdm = 2*(Fp - Fm) / dm;
 
 t = [dFdm; dm];
 end
+
+% [~, F1, F2] = SSAV_FCH_helpers.compute_F(uf, 0);
+% mu = eps^4*ifft(Grid.k4.*uf_hat, 'symmetric') ...
+%     -eps^2 * ifft(-Grid.k2 .* fft(F1), 'symmetric') ...
+%     -eps^2 * F2 .* ifft(-Grid.k2 .* uf_hat, 'symmetric') ...
+%     + F1 .* F2 ...
+%     + eta * eps^2 * ifft(-Grid.k2 .* uf_hat, 'symmetric') ...
+%     - eta * F1;
