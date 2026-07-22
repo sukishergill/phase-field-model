@@ -11,10 +11,10 @@ N = 2^7;
 Grid = SSAV_FCH_helpers.generate_Grid(L, N, dim);
 
 % initialize values
-m = 0;         % initial m
+m = 0.01;         % initial m
 
-u = compute_u(Grid, m, eps);
-% u = Results.uu{end};
+% u = compute_u(Grid, m, eps);
+u = Results.uu{end};
 u_vals = cell(1001,1);
 u_vals{1} = u;
 uhat = fft(u);
@@ -35,6 +35,7 @@ Fm(1) = -1;
 tu = -J\Fm;
 
 t = [tu; 1];
+
 
 % t = zeros(N+1, 1);      t(1) = 1;       t(end) = 1;
 
@@ -67,7 +68,7 @@ for j = 1:10
     
     G = [J(2:end,:), Jm; Fm; t'];
 
-    b = [F_curr(2:end); ck_curr(1) - m_curr;...
+    b = [F_curr(2:end); real(ck_curr(1)) - m_curr;...
         (ck_curr - ck)'*t(1:end-1) + (m_curr - m)*t(end) - ds];
 
     dx = G \ (-b);
@@ -95,7 +96,7 @@ m = m_curr;
 
 E = compute_E(u, ck * N, eps, eta, Grid);
 
-u_vals{i} = u;
+u_vals{i+1} = u;
 data = [data, [m; E]];
 
 % update tangent
@@ -120,10 +121,10 @@ set(gca, 'TickLabelInterpreter', 'latex')
 
 function u = compute_u(Grid, m, eps)
 
-% u = tanh((Grid.x + pi*(m + 1)/2) / eps) - ...
-%     tanh((Grid.x- pi*(m + 1)/2) / eps) - 1;
+u = tanh((Grid.x + pi*(m + 1)/2) / eps) - ...
+    tanh((Grid.x- pi*(m + 1)/2) / eps) - 1;
 
-u = m*ones(size(Grid.x));         % test case
+% u = m*ones(size(Grid.x));         % test case
 
 end
 
@@ -145,12 +146,22 @@ function Hv = fch_jac(u, v, eps, eta, Grid)
 % Action of Jacobian on one vector
 
 [~, dF, d2F] = SSAV_FCH_helpers.compute_F(u, 0);
+d3F = 6*u;
+
+what = -eps^2*Grid.k2.*fft(u)/Grid.N - fft(dF)/Grid.N;
+w = real(ifft(what));
 
 dv = real(ifft(Grid.N * v));
 
-w = -eps^2*Grid.k2.*v - fft(dF.*dv)/Grid.N;
+dwhat = -eps^2*Grid.k2.*v - fft(d2F.*dv)/Grid.N;
+dw = real(ifft(Grid.N * dwhat));
 
-Hv = -eps^2*Grid.k2.*w - w.*fft(d2F.*dv)/Grid.N + eta*w;
+
+% Hv = -eps^2*Grid.k2.*w - w.*fft(d2F.*dv)/Grid.N + eta*w;
+Hv = -eps^2*Grid.k2.*dwhat ...
+     - fft(d2F.*dw)/Grid.N ...
+     - fft(d3F.*dv.*w)/Grid.N ...
+     + eta*dwhat;
 Hv = -Grid.k2.*Hv;
 
 end
@@ -181,11 +192,11 @@ end
 function mu = compute_mu(ck, eps, eta, Grid)
 
 u = real(ifft(Grid.N*ck));
-lap_ck = -Grid.k2 .* ck;
 [~, dF, d2F] = SSAV_FCH_helpers.compute_F(u, 0);
 
-w = -eps^2.*Grid.k2.*ck - fft(dF)/Grid.N;
-mu = -eps^2*Grid.k2.*w - w.*fft(d2F)/Grid.N + eta*w;
+what = -eps^2.*Grid.k2.*ck - fft(dF)/Grid.N;
+w = real(ifft(what*Grid.N));
+mu = -eps^2*Grid.k2.*what - fft(d2F.*w)/Grid.N + eta*what;
 mu = -Grid.k2.*mu;
 end
 

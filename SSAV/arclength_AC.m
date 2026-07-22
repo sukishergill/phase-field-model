@@ -26,7 +26,7 @@ data = [m; E];
 
 ds = 1/1000;
 
-[~, J] = ac_jac_matrix(u, ck, eps, Grid);
+[J, J_FD] = ac_jac_matrix(u, ck, eps, Grid);
 Fm = zeros(Grid.N, 1);
 Fm(1) = -1;
 
