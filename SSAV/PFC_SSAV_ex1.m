@@ -11,7 +11,7 @@ model = 2;
 Para.alpha = 0;
 Para.beta = 0.2;
 Para.epsilon = 1;
-Para.err_tol = [1e-3, 1e-5, 1e-5, 1e-6, 1e-9, 1e-4];
+Para.err_tol = [1e-3, 1e-3, 1e-5, 1e-6, 1e-9, 1e-4];
 Para.err_tol_AM3 = 1e-6;
 Para.rho_s = 0.9;
 Para.sigma = 500;
@@ -54,10 +54,10 @@ Grid = SSAV_helpers.generate_Grid(L, N, dim, model);
 % time discretization
 % if dt_min = dt_max BDF2 will be implemented, otherwise an adaptive time
 % stepping scheme will be used
-% Time.dt_max = 6;        % minimum time step
-% Time.dt_min = 0.0001;        % maximum time step
-Time.dt_max = 0.5;
-Time.dt_min = 0.5;
+Time.dt_max = 10;        % minimum time step
+Time.dt_min = 1e-3;        % maximum time step
+% Time.dt_max = 0.5;
+% Time.dt_min = 1e-3;
 Time.t0 = 0;
 Time.tf = 1000;
 Time.adap = 5;
@@ -65,6 +65,8 @@ Time.adap = 5;
 % Initial condition
 % u = 0.2*cos(pi*xx / 16).*cos(pi*yy / 16);
 u = 0.1*rand(Grid.N(1),Grid.N(2));
+u = smoothdata2(u);
+
 u = Para.m + u - mean(u(:));
 
 % u = 0.01*rand(Grid.Nx,Grid.Ny);
