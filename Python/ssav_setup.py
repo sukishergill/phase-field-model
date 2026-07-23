@@ -7,16 +7,20 @@ from typing import Optional
 @dataclass
 class Parameters:
     eps: float
+    alpha: float
+    beta: float
+    delta: float
+    err_tol: np.ndarray
     M: float
     m: float
-    S: float
+    S: float#
     B: float
+    model: str
 
 @dataclass
 class TimeDomain:
-    #dt_min: float
-    #dt_max: float
-    dt: float
+    dt_min: float
+    dt_max: float
     t0: float
     tf: float
 
@@ -44,10 +48,10 @@ class Grid:
     k6: Optional[np.ndarray] = None
 
 
-def generate_Grid(L, N, dim):
 
     # Generate spatial and Fourier grids
-
+def generate_Grid(L, N, dim):
+    
     L = np.asarray(L, dtype=float)
     N = np.asarray(N, dtype=int)
 
@@ -55,6 +59,9 @@ def generate_Grid(L, N, dim):
 
     grid = Grid(L=L, N=N, d=d)
 
+    grid.V = np.prod(L)
+    grid.dV = np.prod(d)
+    
     x = []
     k = []
 
@@ -105,5 +112,5 @@ def generate_Grid(L, N, dim):
     grid.k2 = grid.k**2
     grid.k4 = grid.k2**2
     grid.k6 = grid.k2**3
-
+    
     return grid
