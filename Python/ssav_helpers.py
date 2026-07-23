@@ -57,7 +57,7 @@ def compute_ip(Hs, psi_r, psi_H, Grid):
     return innprod_Hu
 
 
-def compute_unew(u_curr, ucurr_fft, u_prev, uprev_fft, w_curr, w_prev, dt, Para, Grid, G, P1, t):
+def compute_unew(u_curr, ucurr_fft, u_prev, uprev_fft, w_curr, w_prev, dt, dt_new, Para, Grid, G, P1, t):
 
     us = compute_us(u_curr, u_prev, dt_new/dt)
 
@@ -91,3 +91,17 @@ def compute_unew(u_curr, ucurr_fft, u_prev, uprev_fft, w_curr, w_prev, dt, Para,
     u_new = 0.5*innprod_Hu*psi_H + psi_r
 
     return u_new, w_new
+
+
+def compute_dtnew(E_t, err_tol, delta, dt, dt_min, dt_max):
+
+    dt_1 = err_tol[0] / (E_t + delta)
+    dt_2 = err_tol[1] / np.sqrt(E_t + delta**2)
+
+    dt_prop = min(dt_1, dt_2)
+
+    min_dt = min(dt_max, 2*dt, dt_prop)
+
+    dt_new = max(dt_min, min_dt, 0.1*dt)
+
+    return dt_new

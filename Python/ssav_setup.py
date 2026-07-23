@@ -8,6 +8,7 @@ from typing import Optional
 class Parameters:
     eps: float
     alpha: float
+    beta: float
     delta: float
     err_tol: np.ndarray
     M: float

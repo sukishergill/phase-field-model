@@ -109,7 +109,7 @@ def ssav(Grid, Time, Para, u, model, dim):
             dt_new = dt
 
         else:
-            dt_new = compute_dtnew(E_t, Para.err_tol, Para.delta, dt,
+            dt_new = compute_dtnew(abs(E_t), Para.err_tol, Para.delta, dt,
                                    Time.dt_min, Time.dt_max)
 
         E.append(E_new)
