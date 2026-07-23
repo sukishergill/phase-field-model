@@ -25,6 +25,11 @@ if dim == 1
     k2_full = k_even{1}.^2;
 end
 
+if dim == 1
+    Grid.x = Grid.x{1};
+    Grid.k = Grid.k{1};
+end
+
 if dim == 2
     [Grid.xx, Grid.yy] = meshgrid(Grid.x{1}, Grid.x{2});
     [Grid.kxx, Grid.kyy] = meshgrid(k{1}, k{2});
