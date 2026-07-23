@@ -11,11 +11,12 @@ N = 2^7;
 Grid = SSAV_FCH_helpers.generate_Grid(L, N, dim);
 
 % initialize values
-m = 0.001;         % initial m
+m = 0.01;         % initial m
 
-% compute u, F(u), F'(u), F''(u) to compute initial E
 % u = compute_u(Grid, m, eps);
 u = Results.uu{end};
+u_vals = cell(1001,1);
+u_vals{1} = u;
 uhat = fft(u);
 ck = uhat / N;
 
@@ -23,51 +24,79 @@ E = compute_E(u, uhat, eps, eta, Grid);       % initial E(u)
 
 data = [m; E];
 
-ds = 1/1000;
+ds = 1E-4;
 
 % initialize tangent vector
-t = zeros(N+1, 1);      t(1) = 1;       t(end) = 1;
 
-% t = initialize_t(m, 1/1000, ds, eps, eta, Grid);
+[J, J_FD] = fch_jac_matrix(u, ck, eps, eta, Grid);
+
+% The raw (un-bordered) Jacobian J is singular here by construction: row 1
+% (the mean/k=0 mode) is identically zero because fch_jac/compute_mu end by
+% multiplying through by -Grid.k2, and Grid.k2(1)=0. Solving J\Fm directly
+% always triggers a singular-matrix error. Instead build the same bordered
+% (under-determined) system used later in the loop -- drop row 1 and
+% replace it with the linearized mass constraint tu(1) - tm = 0 -- and take
+% its null vector directly as the initial tangent (oriented so the branch
+% is traversed with m increasing).
+Jm = zeros(N-1, 1);
+Fm_row = zeros(1, N+1);    Fm_row(1) = 1; Fm_row(end) = -1;
+B = [J(2:end,:), Jm; Fm_row];
+t = null(B);
+if t(end) < 0
+    t = -t;
+end
+
+
+% t = zeros(N+1, 1);      t(1) = 1;       t(end) = 1;
+
+% t = initialize_t(m, ds, ds, eps, eta, Grid);
 % t = rand(N+1, 1);
+% t = [dck/ds; ds];
 
 t = t / norm(t, 2);         % initial tangent vector
 
-while m < 1
+% i = 2;
+
+for i = 1:1000
 
 % compute predictor
 ck_curr = ck + ds * t(1:end-1);
 m_curr = m + ds * t(end);
-u_curr = ifft(ck_curr * N, 'symmetric');
+u_curr = real(ifft(ck_curr * N));
 
-% compute corrector
+%compute corrector
 for j = 1:10
 
-    grad = compute_RHS(gradientinit(ck_curr), u_curr, eps, eta, Grid);
-    F_curr = grad.x;
-    J = grad.dx;
+    ck_curr(1) = real(ck_curr(1));
+    m_curr = real(m_curr);
+    F_curr = compute_mu(ck_curr, eps, eta, Grid);
+
+    [J, ~] = fch_jac_matrix(u_curr, ck_curr, eps, eta, Grid);
 
     Fm = zeros(1, N+1);     Fm(1) = 1; Fm(end) = -1;
-    G = [J(2:end,:), zeros(N-1, 1); Fm; t'];
-       
-    b = [F_curr(2:end); ck_curr(1) - m;...
+    Jm = zeros(N-1, 1);
+    
+    G = [J(2:end,:), Jm; Fm; t'];
+
+    b = [F_curr(2:end); real(ck_curr(1)) - m_curr;...
         (ck_curr - ck)'*t(1:end-1) + (m_curr - m)*t(end) - ds];
 
     dx = G \ (-b);
-    
+
     ck_new = ck_curr + dx(1:end-1);
-    u_new = ifft(ck_new * N, 'symmetric');
+    u_new = real(ifft(ck_new * N));
+    % u_new = idct(ck_new * sqrt(N));
 
     m_new = m_curr + dx(end);
     m_curr = m_new;
+    ck_curr = ck_new;
+    u_curr = u_new;
 
     % stopping criterion for Newton solver
-    if abs(m_new - m_curr) < 1e-5
+    if norm(dx) < 1e-8 && norm(b) < 1e-8
         break
     end
 
-    ck_curr = ck_new;
-    u_curr = u_new;
 
 end
 
@@ -77,11 +106,11 @@ m = m_curr;
 
 E = compute_E(u, ck * N, eps, eta, Grid);
 
-data = [data, [m_curr; E]];
+u_vals{i+1} = u;
+data = [data, [m; E]];
 
 % update tangent
-grad = compute_RHS(gradientinit(ck), u, eps, eta, Grid);
-J = grad.dx;
+[J, ~] = fch_jac_matrix(u, ck, eps, eta, Grid);
 Jm = zeros(N-1, 1);
 Fm = zeros(1, N+1);     Fm(1) = 1; Fm(end) = -1;
 A = [J(2:end,:), Jm; Fm; t'];
@@ -92,14 +121,18 @@ end
 
 figure;
 plot(data(1,:), data(2,:), 'Linewidth', 3)
-xlim([0, 1])
+% xlim([0, 1])
+xlabel('$m$', 'Interpreter','latex')
+ylabel('$E$', 'Interpreter', 'latex')
+set(gca, 'FontSize', 30)
+set(gca, 'TickLabelInterpreter', 'latex')
 
 
 
 function u = compute_u(Grid, m, eps)
 
 u = tanh((Grid.x + pi*(m + 1)/2) / eps) - ...
-    tanh((Grid.x - pi*(m + 1)/2) / eps) - 1;
+    tanh((Grid.x- pi*(m + 1)/2) / eps) - 1;
 
 % u = m*ones(size(Grid.x));         % test case
 
@@ -119,81 +152,62 @@ E = E / prod(Grid.L);
 
 end
 
+function Hv = fch_jac(u, v, eps, eta, Grid)
+% Action of Jacobian on one vector
 
-function lu = fch_coslap(u, L)
-%FCH_COSLAP  Cosine-basis Laplacian via even extension and FFT.
-%   lu = FCH_COSLAP(u,L) applies the Neumann/cosine Laplacian to a 1D
-%   vector or 2D array sampled on the cell-centered grid. L is either a
-%   scalar domain length in 1D, or [Lx Ly] in 2D. Defaults are 2*pi.
+[~, dF, d2F] = SSAV_FCH_helpers.compute_F(u, 0);
+d3F = 6*u;
 
-    if nargin < 2 || isempty(L)
-        L = 2*pi;
-    end
-        s = size(u);
-        u = u(:).';
-        N = numel(u);
-        Lx = L(1);
+what = -eps^2*Grid.k2.*fft(u)/Grid.N - fft(dF)/Grid.N;
+w = real(ifft(what*Grid.N));
 
-        ue  = [u, fliplr(u)];
-        kap = (pi/Lx) * [0:N-1, -N:-1];
-        le  = real(ifft(-(kap.^2) .* fft(ue)));
-        lu  = reshape(le(1:N), s);
+dv = real(ifft(Grid.N * v));
+
+dwhat = -eps^2*Grid.k2.*v - fft(d2F.*dv)/Grid.N;
+dw = real(ifft(Grid.N * dwhat));
+
+
+% Hv = -eps^2*Grid.k2.*w - w.*fft(d2F.*dv)/Grid.N + eta*w;
+Hv = -eps^2*Grid.k2.*dwhat ...
+     - fft(d2F.*dw)/Grid.N ...
+     - fft(d3F.*dv.*w)/Grid.N ...
+     + eta*dwhat;
+Hv = -Grid.k2.*Hv;
+
 end
-%------------------
-
-% Action of the Jacobian on one vector
-%------------------
-function Hv = fch_jac(u, v, eps, eta, L, W, dW, d2W, d3W)
-%FCH_JAC  Matrix-free FCH Hessian/Jacobian action.
-%   Hv = FCH_JAC(u,v,eps,eta,L,W,dW,d2W,d3W) computes
-%       Jac(u)v = (A+eta)A v - W'''(u) w v.
-
-    if nargin < 5 || isempty(L),   L   = 2*pi;                    end
-    if nargin < 6 || isempty(W),   W   = @(u) 0.25*(u.^2 - 1).^2; end
-    if nargin < 7 || isempty(dW),  dW  = @(u) u.^3 - u;           end
-    if nargin < 8 || isempty(d2W), d2W = @(u) 3*u.^2 - 1;         end
-    if nargin < 9 || isempty(d3W), d3W = @(u) 6*u;                end
-
-    lu = fch_coslap(u, L);
-    w  = eps^2*lu - dW(u);
-    A  = @(f) eps^2*fch_coslap(f, L) - d2W(u).*f;
-    Av = A(v);
-    Hv = A(Av) + eta*Av - d3W(u).*w.*v;
-end
-
-%------------------
-
 
 % Build the full Jacobian
-function J = fch_jac_matrix(u, eps, eta, L, varargin)
+function [J, J_FD] = fch_jac_matrix(u, ck, eps, eta, Grid)
 %FCH_JAC_MATRIX  Dense FCH Hessian/Jacobian matrix assembled by matvecs.
 %   Intended for small 1D or small 2D problems.
 
-    if nargin < 4 || isempty(L), L = 2*pi; end
+J = zeros(Grid.N);
+J_FD = J;
 
-    sz = size(u);
-    n  = numel(u);
-    J  = zeros(n, n);
-    e  = zeros(sz);
+e = zeros(size(u));
+h = 1e-6;
 
-    for j = 1:n
-        e(j) = 1;
-        col = fch_jac(u, e, eps, eta, L, varargin{:});
-        J(:, j) = col(:);
-        e(j) = 0;
-    end
+for i = 1:Grid.N
+    e(i) = 1;
+    col = fch_jac(u, e, eps, eta, Grid);
+    J_FD(:,i) = (compute_mu(ck+e*h, eps, eta, Grid) - ...
+        compute_mu(ck-e*h, eps, eta, Grid))/(2*h);
+    J(:,i) = col(:);
+    e(i) = 0;
+
+end
 end
 %------------------
 
-function f = compute_RHS(ck, u, eps, eta, Grid)
+function mu = compute_mu(ck, eps, eta, Grid)
 
-f = eps^4 * Grid.k4 .* ck ...
-    + eps^2 * Grid.k2 .* ck .* (fft(u.^3) - 1) ...
-    + eps^2 * Grid.k2 .* ck.^1 .* (fft(3*u.^2 - 1)) ...
-    - ck .* (fft(3*u.^5 - 4*u.^3) + 1) ...
-    - eta * eps^2 * Grid.k2 .* ck ...
-    - eta * ck .* (fft(u.^3) - 1);
+u = real(ifft(Grid.N*ck));
+[~, dF, d2F] = SSAV_FCH_helpers.compute_F(u, 0);
 
+what = -eps^2.*Grid.k2.*ck - fft(dF)/Grid.N;
+w = real(ifft(what*Grid.N));
+mu = -eps^2*Grid.k2.*what - fft(d2F.*w)/Grid.N + eta*what;
+mu = -Grid.k2.*mu;
 end
 
 function t = initialize_t(m, dm, ds, eps, eta, Grid)
@@ -212,3 +226,4 @@ dFdm = 2*(Fp - Fm) / dm;
 
 t = [dFdm; dm];
 end
+
