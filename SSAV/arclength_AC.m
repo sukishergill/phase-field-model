@@ -27,12 +27,21 @@ data = [m; E];
 ds = 1/1000;
 
 [J, J_FD] = ac_jac_matrix(u, ck, eps, Grid);
-Fm = zeros(Grid.N, 1);
-Fm(1) = -1;
 
-tu = -J\Fm;
-
-t = [tu; 1];
+% The raw (un-bordered) Jacobian J is singular (it has a translation/mass
+% mode in its null space), so solving J\Fm directly is ill-posed and
+% triggers a singular-matrix warning. Instead build the same bordered
+% (under-determined) system used later in the loop -- drop row 1 (the
+% redundant mean-mode equation) and replace it with the linearized mass
+% constraint tu(1) - tm = 0 -- and take its null vector directly as the
+% initial tangent (oriented so the branch is traversed with m increasing).
+Jm = zeros(N-1, 1);
+Fm_row = zeros(1, N+1);    Fm_row(1) = 1; Fm_row(end) = -1;
+B = [J(2:end,:), Jm; Fm_row];
+t = null(B);
+if t(end) < 0
+    t = -t;
+end
 
 % initialize tangent vector
 % t = zeros(N+1, 1);      t(1) = 1;       t(end) = 1;

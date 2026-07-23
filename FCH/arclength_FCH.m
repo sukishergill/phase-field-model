@@ -29,12 +29,22 @@ ds = 1E-4;
 % initialize tangent vector
 
 [J, J_FD] = fch_jac_matrix(u, ck, eps, eta, Grid);
-Fm = zeros(Grid.N, 1);
-Fm(1) = -1;
 
-tu = -J\Fm;
-
-t = [tu; 1];
+% The raw (un-bordered) Jacobian J is singular here by construction: row 1
+% (the mean/k=0 mode) is identically zero because fch_jac/compute_mu end by
+% multiplying through by -Grid.k2, and Grid.k2(1)=0. Solving J\Fm directly
+% always triggers a singular-matrix error. Instead build the same bordered
+% (under-determined) system used later in the loop -- drop row 1 and
+% replace it with the linearized mass constraint tu(1) - tm = 0 -- and take
+% its null vector directly as the initial tangent (oriented so the branch
+% is traversed with m increasing).
+Jm = zeros(N-1, 1);
+Fm_row = zeros(1, N+1);    Fm_row(1) = 1; Fm_row(end) = -1;
+B = [J(2:end,:), Jm; Fm_row];
+t = null(B);
+if t(end) < 0
+    t = -t;
+end
 
 
 % t = zeros(N+1, 1);      t(1) = 1;       t(end) = 1;
@@ -149,7 +159,7 @@ function Hv = fch_jac(u, v, eps, eta, Grid)
 d3F = 6*u;
 
 what = -eps^2*Grid.k2.*fft(u)/Grid.N - fft(dF)/Grid.N;
-w = real(ifft(what));
+w = real(ifft(what*Grid.N));
 
 dv = real(ifft(Grid.N * v));
 
