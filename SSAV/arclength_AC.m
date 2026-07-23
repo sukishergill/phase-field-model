@@ -38,7 +38,13 @@ ds = 1/1000;
 Jm = zeros(N-1, 1);
 Fm_row = zeros(1, N+1);    Fm_row(1) = 1; Fm_row(end) = -1;
 B = [J(2:end,:), Jm; Fm_row];
-t = null(B);
+
+% null(B) relies on a rank tolerance that scales with the largest singular
+% value, which can lump more than one small-but-distinct singular value in
+% as "null" for an ill-conditioned matrix. Sidestep the ambiguity: take the
+% right singular vector for the single smallest singular value directly.
+[~, ~, V] = svd(B);
+t = V(:, end);
 if t(end) < 0
     t = -t;
 end

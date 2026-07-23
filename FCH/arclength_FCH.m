@@ -41,7 +41,15 @@ ds = 1E-4;
 Jm = zeros(N-1, 1);
 Fm_row = zeros(1, N+1);    Fm_row(1) = 1; Fm_row(end) = -1;
 B = [J(2:end,:), Jm; Fm_row];
-t = null(B);
+
+% null(B) relies on a rank tolerance that scales with the largest singular
+% value; B's singular values here span many orders of magnitude (the FCH
+% operator is 6th-order), so several small-but-distinct singular values can
+% end up under that same tolerance and null() returns more than one column.
+% Sidestep the ambiguity: take the right singular vector for the single
+% smallest singular value directly.
+[~, ~, V] = svd(B);
+t = V(:, end);
 if t(end) < 0
     t = -t;
 end
