@@ -7,16 +7,20 @@ from typing import Optional
 @dataclass
 class Parameters:
     eps: float
+    alpha: float
+    beta: float
+    delta: float
+    err_tol: np.ndarray
     M: float
     m: float
     S: float
     B: float
+    model: str
 
 @dataclass
 class TimeDomain:
-    #dt_min: float
-    #dt_max: float
-    dt: float
+    dt_min: float
+    dt_max: float
     t0: float
     tf: float
 
@@ -26,6 +30,9 @@ class Grid:
     L: np.ndarray
     N: np.ndarray
     d: np.ndarray
+
+    V: Optional[float] = None
+    dV: Optional[float] = None
 
     x: Optional[list] = None
     k: Optional[np.ndarray] = None
@@ -54,6 +61,9 @@ def generate_Grid(L, N, dim):
     d = L / N
 
     grid = Grid(L=L, N=N, d=d)
+
+    grid.V = np.prod(L)
+    grid.dV = np.prod(d)
 
     x = []
     k = []
