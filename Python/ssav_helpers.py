@@ -4,20 +4,21 @@ import numpy as np
 from numpy.fft import fftn, ifftn, fftfreq
 
 def compute_E(ufft, w, Grid, Para):
+    # Compute free energy
 
     ux = np.real(ifftn(-1j * Grid.kxx * ufft))
     uy = np.real(ifftn(-1j * Grid.kyy * ufft))
 
     du = ux**2 + uy**2
 
-    return np.sum(0.5 * Para.eps**2 * du)*np.prod(Grid.d) + w**2 - Para.B
+    return np.sum(0.5 * Para.eps**2 * du)*Grid.dV + w**2 - Para.B
 
-def compute_us(u_curr, u_prev):
-    return 2 * u_curr - u_prev
+def compute_us(u_curr, u_prev, gamma):
+    return (gamma+1) * u_curr - gamma * u_prev
 
-def compute_F(u):
-    F = 0.25 * (u**2 - 1)**2
-    f = u**3 - u
+def compute_F(u, beta):
+    F = 0.25 * (u**2 - beta)**2
+    f = u**3 - beta*u
 
     return F, f
 
@@ -39,36 +40,36 @@ def compute_dt_coeffs(dt, dt_new):
 
 def compute_r(us, us_fft, u_curr, u_prev, w_curr, w_prev, Hs, H2, a, b, c, Grid, Para, G, t, dt):
 
-    r = -(b*w_curr + c*w_prev)/a + 0.5 * np.sum(Hs * (b*u_curr + c*u_prev)/a) * np.prod(Grid.d);
+    r = -(b*w_curr + c*w_prev)/a + 0.5 * np.sum(Hs * (b*u_curr + c*u_prev)/a) * Grid.dV;
 
     r_tilde = -(b*u_curr + c*u_prev) - Para.S*np.real(ifftn(G*us_fft)) + r*np.real(ifftn(G*H2))
 
-    # m_est
+    m_est = (Para.alpha*Para.eps**2) / (a*Grid.V) * np.sum(r_tilde)*Grid.dV
 
-    r_hat = r_tilde
+    r_hat = r_tilde + m_est
 
     return r, r_hat
 
 def compute_ip(Hs, psi_r, psi_H, Grid):
 
-    innprod_Hu = np.sum(Hs * psi_r)*np.prod(Grid.d) / (1 - 0.5*np.sum(Hs*psi_H)*np.prod(Grid.d))
+    innprod_Hu = np.sum(Hs * psi_r)*Grid.dV / (1 - 0.5*np.sum(Hs*psi_H)*Grid.dV)
 
     return innprod_Hu
 
 
 def compute_unew(u_curr, ucurr_fft, u_prev, uprev_fft, w_curr, w_prev, dt, Para, Grid, G, P1, t):
 
-    us = compute_us(u_curr, u_prev)
+    us = compute_us(u_curr, u_prev, dt_new/dt)
 
-    F, f = compute_F(us)
+    F, f = compute_F(us, Para.beta)
 
-    int_F = np.sum(F)*np.prod(Grid.d)
+    int_F = np.sum(F)*Grid.dV
 
     ws = compute_w(int_F, Para.B)
 
     Hs = compute_H(f, ws)
 
-    a,b,c = compute_dt_coeffs(dt, dt)
+    a,b,c = compute_dt_coeffs(dt, dt_new)
 
     H2 = fftn(Hs)
 
