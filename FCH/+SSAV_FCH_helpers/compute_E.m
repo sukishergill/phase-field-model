@@ -17,6 +17,6 @@ E = sum(0.5*Para.epsilon^4 * (real(ifftn(-Grid.k.^2 .* u_fft))).^2 - ...
     (Para.tau^2/3 + Para.eta1/2 + 1)*Para.epsilon^2*du, 'all')*prod(Grid.d)...
     + w^2 - Para.B;
 
-% E = E / prod(Grid.L);
+E = E / prod(Grid.L);
 
 end

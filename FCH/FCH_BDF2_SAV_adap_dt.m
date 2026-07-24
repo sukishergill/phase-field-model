@@ -21,7 +21,8 @@ end
 
 u_fft = fftn(u);
 
-Eu = zeros(1, nmax); 
+Eu = zeros(1, nmax);
+Eu_direct = zeros(1, nmax);
 Et_vals = zeros(1, nmax);
 t_vals = zeros(1, nmax);
 dt_idx = zeros(1, nmax);
@@ -42,6 +43,7 @@ G = SSAV_FCH_helpers.compute_G(u, Para, F, F1, Grid);
 w_old = SSAV_FCH_helpers.compute_w(G, Para.B);
 
 Eu(1) = SSAV_FCH_helpers.compute_E(u_fft, w_old, Para, Grid);
+Eu_direct(1) = SSAV_FCH_helpers.compute_E_direct(u, u_fft, Para.epsilon, Para.eta1, Grid);
 
 H = SSAV_FCH_helpers.compute_H(u, w_old, Para, F1, F2, Grid);
 H_old = H;
@@ -77,6 +79,7 @@ u_fft(1, 1) = mass;         u = ifftn(u_fft);
 t = t + dt;
 
 Eu(2) = SSAV_FCH_helpers.compute_E(u_fft, w, Para, Grid);
+Eu_direct(2) = SSAV_FCH_helpers.compute_E_direct(u, u_fft, Para.epsilon, Para.eta1, Grid);
 
 E_t = (Eu(2) - Eu(1)) / dt;
 Et_vals(2) = E_t;
@@ -228,6 +231,8 @@ while t < Time.tf
 
     t = t + dt;
     Eu(j + 1) = E_new;
+    Eu_direct(j + 1) = SSAV_FCH_helpers.compute_E_direct(u_new, u_new_fft, ...
+        Para.epsilon, Para.eta1, Grid);
     Et_vals(j + 1) = E_t;
 
     w_old = w;                      w = w_new;
@@ -261,6 +266,7 @@ if Time.dt_max ~= Time.dt_min
 
     nt = sum(t_vals > 0) + 1;
     Eu = Eu(1:nt);
+    Eu_direct = Eu_direct(1:nt);
     Et_vals = Et_vals(1:nt);
     t_vals = t_vals(1:nt);
     dt_idx = dt_idx(1:nt-1);
@@ -270,6 +276,7 @@ end
 
 Results.t_vals = t_vals;
 Results.Eu = Eu;
+Results.Eu_direct = Eu_direct;
 Results.Et_vals = Et_vals;
 Results.uu = uu;
 Results.dt_idx = dt_idx;

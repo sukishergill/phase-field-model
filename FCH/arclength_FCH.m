@@ -15,12 +15,12 @@ eps = 0.1;      eta = eps^2;
 % generate grid
 dim = 1;
 L = 2*pi;
-N = 2^7;
+N = 2^8;
 Grid = SSAV_FCH_helpers.generate_Grid(L, N, dim);
 Nc = N/2 + 1;       % number of independent cosine (even) Fourier coefficients
 
 % initialize values
-m = 0.01;         % initial m
+m = 0;         % initial m
 
 % u = compute_u(Grid, m, eps);
 u = Results.uu{end};
@@ -29,7 +29,7 @@ u_vals{1} = u;
 ck = fft(u) / N;
 c = reduce_cos(ck, N);      % restrict to the cosine (even) subspace
 
-E = compute_E(u, ck*N, eps, eta, Grid);       % initial E(u)
+E = SSAV_FCH_helpers.compute_E_direct(u, ck*N, eps, eta, Grid);       % initial E(u)
 
 data = [m; E];
 
@@ -84,7 +84,11 @@ ck_curr = expand_cos(c_curr, N);
 u_curr = real(ifft(ck_curr * N));
 
 %compute corrector
-for j = 1:10
+its = 0;
+ndx = 1;
+F_curr = compute_mu_cos(c_curr, eps, eta, Grid);
+norm(F_curr)
+while its < 100 && ndx > 1e-6
 
     F_curr = compute_mu_cos(c_curr, eps, eta, Grid);
 
@@ -113,8 +117,9 @@ for j = 1:10
     if norm(dx) < 1e-8 && norm(b) < 1e-8
         break
     end
-
-
+    ndx = norm(dx);
+    its = its+1;
+    disp([ndx its])
 end
 
 c = c_curr;
@@ -122,7 +127,7 @@ ck = expand_cos(c, N);
 u = u_curr;
 m = m_curr;
 
-E = compute_E(u, ck * N, eps, eta, Grid);
+E = SSAV_FCH_helpers.compute_E_direct(u, ck * N, eps, eta, Grid);
 
 u_vals{i+1} = u;
 data = [data, [m; E]];
@@ -156,19 +161,6 @@ u = tanh((Grid.x + pi*(m + 1)/2) / eps) - ...
 
 end
 
-
-function E = compute_E(u, uhat, eps, eta, Grid)
-
-[F, dF, ~] = SSAV_FCH_helpers.compute_F(u, 0);
-
-ux = real(ifftn(-1i*Grid.k.*uhat));
-uxx = real(ifftn(-Grid.k.^2 .* uhat));
-
-E = sum(0.5*(-eps^2*uxx + dF).^2 - eta*(eps^2*0.5*ux.^2 + F))*prod(Grid.d);
-
-E = E / prod(Grid.L);
-
-end
 
 function Hv = fch_jac(u, v, eps, eta, Grid)
 % Action of Jacobian on one vector
