@@ -15,7 +15,7 @@ class Output:
     tt: np.ndarray
 
 
-def ssav(Grid, Time, Para, u, model, dim):
+def ssav(Grid, Time, Para, u, dim):
 
     dt = Time.dt_min
     tt = []

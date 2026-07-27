@@ -15,12 +15,12 @@ eps = 0.1;      eta = eps^2;
 % generate grid
 dim = 1;
 L = 2*pi;
-N = 2^8;
+N = 2^7;
 Grid = SSAV_FCH_helpers.generate_Grid(L, N, dim);
 Nc = N/2 + 1;       % number of independent cosine (even) Fourier coefficients
 
 % initialize values
-m = 0;         % initial m
+m = 0.01;         % initial m
 
 % u = compute_u(Grid, m, eps);
 u = Results.uu{end};

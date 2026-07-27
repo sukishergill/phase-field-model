@@ -3,15 +3,53 @@
 import numpy as np
 from numpy.fft import fftn, ifftn, fftfreq
 
-def compute_E(ufft, w, Grid, Para):
+def compute_E(ufft, w, Grid, Para, D, dim):
     # Compute free energy
+    #En = w**22 - Para.B
 
+    #e = 0.5*Para.eps**2
     ux = np.real(ifftn(-1j * Grid.kxx * ufft))
     uy = np.real(ifftn(-1j * Grid.kyy * ufft))
 
     du = ux**2 + uy**2
 
     return np.sum(0.5 * Para.eps**2 * du)*Grid.dV + w**2 - Para.B
+    
+    #En += np.sum(e*du) * Grid.dV
+    # if Para.model != "PFC":
+
+    #     ux = np.real(ifftn(-1j * Grid.kxx * ufft))
+    #     du = ux**2
+
+    #     if dim != 1:
+    #         uy = np.real(ifftn(-1j * Grid.kyy * ufft))
+    #         du += uy**2
+
+    #         if dim == 3:
+    #             uz = np.real(ifftn(-1j * Grid.kzz * ufft))
+    #             du += uz**2
+
+    #     En += np.sum(e*du) * Grid.dV
+
+    #     if Para.model == "OK":
+    #         um_fft = ufft - Para.m
+    #         v = -Grid.inv_k * um_fft
+    #         v[Grid.k == 0] = 0;
+
+    #         vx = np.real(ifftn(-1j*Grid.kxx*v))
+    #         dv = vx**2
+
+    #         if dim != 1:
+    #             vy = np.real(ifftn(-1j*Grid.kyy*v))
+    #             dv += vy**2
+    
+    #             if dim == 3:
+    #                 vz = np.real(ifftn(-1j*Grid.kzz*v))
+    #                 dv += vz**2
+    
+    #         En += np.sum(e*Para.alpha * dv) * Grid.dV
+
+    #return En
 
 def compute_us(u_curr, u_prev, gamma):
     return (gamma+1) * u_curr - gamma * u_prev

@@ -8,7 +8,7 @@ r = -(b*w_curr + c*w_prev)/a + 0.5 * sum((H_snew .* ...
 
 % rH = fftn(r .* H_snew);         num_fft = num_fft + 1;    
 
-forcing = SSAV_helpers.compute_forcing(Para.epsilon, Grid.xx, Grid.yy, t);
+% forcing = SSAV_helpers.compute_forcing(Para.epsilon, Grid.xx, Grid.yy, t);
 
 r_tilde = -(b*u_curr + c*u_prev) - Para.S*(ifftn(G .* u_snew_fft, 'symmetric')) + ...
     r*ifftn(G .* H2, 'symmetric');% + forcing;
