@@ -252,14 +252,15 @@ while t < Time.tf
         2*w_new - w, Para, Grid, D, model, dim)) / 2 + ...
         sum(Para.S/2 * (u_new - u).^2, 'all')*prod(Grid.d);
 
-    drift = abs(E_new - E_mod);
+    Eu_sym(j + 1) = 0.5*(E_new + SSAV_helpers.compute_En(2*u_new_fft - u_fft, ...
+            2*w_new - w, Para, Grid, D, model, dim));
 
-    E_t = (E_new - Eu(j)) / dt_new;
+    E_t = (Eu_sym(j+1) - Eu_sym(j)) / dt_new;
     Et_vals(j) = E_t;
 
     l = 0;
     if Time.adap == 5
-    while E_t > 1e-3 && dt_new > Time.dt_min && l <= 5
+    while E_t > 1e-8 && dt_new > Time.dt_min && l <= 5
 
         dt_new = max(gamma * dt_new / 4, Time.dt_min);
         gamma = dt_new / dt;
@@ -279,9 +280,10 @@ while t < Time.tf
             2*w_new - w, Para, Grid, D, model, dim)) / 2 + ...
             sum(Para.S/2 * (u_new - u).^2, 'all')*prod(Grid.d);
 
-        drift = abs(E_new - E_mod);
+        Eu_sym(j + 1) = 0.5*(E_new + SSAV_helpers.compute_En(2*u_new_fft - u_fft, ...
+            2*w_new - w, Para, Grid, D, model, dim));
 
-        E_t = (E_new - Eu(j)) / dt_new;
+        E_t = (Eu_sym(j+1) - Eu_sym(j)) / dt_new;
 
         l = l + 1;
 
@@ -352,15 +354,12 @@ while t < Time.tf
             dt_2 = Para.err_tol(2) / sqrt(abs(E_t)+ Para.delta^2);
 
             [dt_prop, dt_idx(j)] = min([dt_1, dt_2]);
-
-          
+        
             [min_dt, dt_prop_true(j)] = min([Time.dt_max, 2*dt, dt_prop]);
 
             dt_new = max([Time.dt_min, min_dt, 0.1*dt]);
         end
     end
-
-    % compute new time step
 
     t = t + dt;
  
@@ -372,10 +371,6 @@ while t < Time.tf
     if save_u == 1 
         uu{j+1} = u_new;
     end
-
-    Eu_sym(j + 1) = 0.5*(E_new + (SSAV_helpers.compute_En(u_new_fft + ...
-        gamma*(u_new_fft - u_fft), w_new + gamma*(w_new - w), ...
-        Para, Grid, D, model, dim)));
 
 
     E_old = E;                      E = E_new;
