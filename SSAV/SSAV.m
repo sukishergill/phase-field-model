@@ -248,12 +248,10 @@ while t < Time.tf
 
     E_new = SSAV_helpers.compute_En(u_new_fft, w_new, Para, Grid, D, model, dim);
 
-    E_mod = E_new/2 + (SSAV_helpers.compute_En(2*u_new_fft - u_fft, ...
-        2*w_new - w, Para, Grid, D, model, dim)) / 2 + ...
-        sum(Para.S/2 * (u_new - u).^2, 'all')*prod(Grid.d);
-
     Eu_sym(j + 1) = 0.5*(E_new + SSAV_helpers.compute_En(2*u_new_fft - u_fft, ...
             2*w_new - w, Para, Grid, D, model, dim));
+
+    E_mod = Eu_sym(j+1) + sum(Para.S/2 * (u_new - u).^2, 'all')*prod(Grid.d);
 
     E_t = (Eu_sym(j+1) - Eu_sym(j)) / dt_new;
     Et_vals(j) = E_t;
@@ -276,12 +274,11 @@ while t < Time.tf
 
         E_new = SSAV_helpers.compute_En(u_new_fft, w_new, Para, Grid, D, model, dim);
 
-        E_mod = E_new/2 + (SSAV_helpers.compute_En(2*u_new_fft - u_fft, ...
-            2*w_new - w, Para, Grid, D, model, dim)) / 2 + ...
-            sum(Para.S/2 * (u_new - u).^2, 'all')*prod(Grid.d);
-
         Eu_sym(j + 1) = 0.5*(E_new + SSAV_helpers.compute_En(2*u_new_fft - u_fft, ...
             2*w_new - w, Para, Grid, D, model, dim));
+
+        E_mod = Eu_sym(j+1) + sum(Para.S/2 * ...
+            (u_new - u).^2, 'all')*prod(Grid.d);
 
         E_t = (Eu_sym(j+1) - Eu_sym(j)) / dt_new;
 
