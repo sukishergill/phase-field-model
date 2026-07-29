@@ -47,7 +47,7 @@ def ssav(Grid, Time, Para, u, dim):
     w_old = compute_w(int_F, Para.B)
 
     E = []
-    E.append(compute_E(ufft, w_old, Grid, Para))
+    E.append(compute_E(ufft, w_old, Grid, Para, D, dim))
 
     H = compute_H(f, w_old)
 
@@ -84,7 +84,7 @@ def ssav(Grid, Time, Para, u, dim):
     u = 0.5*innprod_Hu * psi_H + psi_r
     ufft = fftn(u)
 
-    E_curr = compute_E(ufft, w, Grid, Para)
+    E_curr = compute_E(ufft, w, Grid, Para, D, dim)
     E.append(E_curr)
 
     t = dt
@@ -94,14 +94,14 @@ def ssav(Grid, Time, Para, u, dim):
     ##################################################
     ################# Main time loop #################
     ##################################################
-    for i in range(Nt):
+    while t < Time.tf:
 
         u_new, w_new = compute_unew(u, ufft, u_old, uold_fft, w, w_old, dt, dt_new,
                                     Para, Grid,G, P1, t)
 
         unew_fft = fftn(u_new)
 
-        E_new = compute_E(unew_fft, w_new, Grid, Para)
+        E_new = compute_E(unew_fft, w_new, Grid, Para, D, dim)
 
         E_t = (E_new - E_curr) / dt
 
@@ -109,6 +109,7 @@ def ssav(Grid, Time, Para, u, dim):
             dt_new = dt
 
         else:
+            dt = dt_new
             dt_new = compute_dtnew(abs(E_t), Para.err_tol, Para.delta, dt,
                                    Time.dt_min, Time.dt_max)
 
