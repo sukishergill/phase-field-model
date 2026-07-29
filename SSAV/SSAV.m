@@ -41,6 +41,7 @@ function Results = SSAV(Grid, Time, Para, u, model, dim, save_u, plt_save)
 t = Time.t0;
 
 num_fft = 0;        % start counter for number of FFTs
+reject_steps = 0;   % counter for number of rejected steps for time stepper
 
 dt = Time.dt_min;   % initialize the time step
 
@@ -260,6 +261,8 @@ while t < Time.tf
     if Time.adap == 5
     while E_t > 1e-8 && dt_new > Time.dt_min && l <= 5
 
+        reject_steps = reject_steps + 1;
+
         dt_new = max(gamma * dt_new / 4, Time.dt_min);
         gamma = dt_new / dt;
 
@@ -427,6 +430,7 @@ Results.Em = Em;
 Results.mass = mass;
 Results.t_vals = t_vals;
 Results.num_fft = num_fft;
+Results.reject_steps = reject_steps;
 Results.dt_idx = dt_idx;
 Results.dt_vals = dt_vals;
 Results.dt_prop_true = dt_prop_true;
