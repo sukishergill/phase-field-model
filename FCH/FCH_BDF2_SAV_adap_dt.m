@@ -3,7 +3,7 @@ function Results = FCH_BDF2_SAV(Grid, Time, Para, u, plt_save)
 dt = Time.dt_min;
 t = Time.t0;
 
-num_ftt = 0;
+num_fft = 0;
 reject_steps = 0;
 
 mass = sum(u, 'all');
