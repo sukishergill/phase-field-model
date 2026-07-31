@@ -151,7 +151,7 @@ while t < Time.tf
 
     E_new = SSAV_FCH_helpers.compute_E(u_new_fft, w_new, Para, Grid);
 
-    Eu_sym(j) = 0.5*(Eu_new + SSAV_FCH_helpers.compute_E(2*u_new_fft - u_fft,...
+    Eu_sym(j) = 0.5*(E_new + SSAV_FCH_helpers.compute_E(2*u_new_fft - u_fft,...
         2*w_new - w, Para, Grid));
 
     E_t = (Eu_sym(j+1) - Eu_sym(j)) / dt_new;
@@ -211,7 +211,7 @@ while t < Time.tf
 
         E_new = SSAV_FCH_helpers.compute_E(u_new_fft, w_new, Para, Grid);
 
-        Eu_sym(j) = 0.5*(Eu_new + SSAV_FCH_helpers.compute_E(2*u_new_fft - u_fft,...
+        Eu_sym(j) = 0.5*(E_new + SSAV_FCH_helpers.compute_E(2*u_new_fft - u_fft,...
             2*w_new - w, Para, Grid));
         E_t = (Eu_sym(j+1) - Eu_sym(j)) / dt_new;
         % Et_vals(j) = E_t;
