@@ -3,6 +3,9 @@ function Results = FCH_BDF2_SAV(Grid, Time, Para, u, plt_save)
 dt = Time.dt_min;
 t = Time.t0;
 
+num_ftt = 0;
+reject_steps = 0;
+
 mass = sum(u, 'all');
 
 % define number of time steps and time steps for plotting purposes
@@ -19,9 +22,10 @@ for i = 2:plt_save + 1
     uu{i} = zeros(size(uu{1}));
 end
 
-u_fft = fftn(u);
+u_fft = fftn(u);        num_fft = num_fft + 1;
 
 Eu = zeros(1, nmax);
+Eu_sym = zeros(1, nmax);
 Eu_direct = zeros(1, nmax);
 Et_vals = zeros(1, nmax);
 t_vals = zeros(1, nmax);
@@ -49,7 +53,7 @@ H = SSAV_FCH_helpers.compute_H(u, w_old, Para, F1, F2, Grid);
 H_old = H;
 
 r = w_old - 0.5 * sum(H.*u, 'all')*prod(Grid.d);
-H2 = fftn(H);
+H2 = fftn(H);       num_fft = num_fft + 1;
 
 r_hat = u/dt + (Para.epsilon^2*(2 + Para.eta1 + 2*Para.tau^2/3) + Para.S) * ...
     ifftn(Grid.k4 .* u_fft, 'symmetric') + r * ifftn(-Grid.k2 .* H2, 'symmetric');
@@ -58,7 +62,7 @@ r_hat = u/dt + (Para.epsilon^2*(2 + Para.eta1 + 2*Para.tau^2/3) + Para.S) * ...
 P1 = Para.epsilon^4 * Grid.k6 + Para.S * Grid.k4;
 P = 1/dt + P1;
 
-r_hat = fftn(r_hat);
+r_hat = fftn(r_hat);        num_fft = num_fft + 1;
 psi_r = P .\ r_hat;         psi_r = ifftn(psi_r, 'symmetric');
 
 psi_H = P .\ (G .* H2);     psi_H = ifftn(psi_H, 'symmetric');
@@ -72,7 +76,7 @@ u_old = u;
 u_old_fft = u_fft;
 
 u = 0.5 * innprod_Hu * psi_H + psi_r;
-u_fft = fftn(u);
+u_fft = fftn(u);        num_fft = num_fft + 1;
 
 u_fft(1, 1) = mass;         u = ifftn(u_fft);
 
@@ -80,6 +84,9 @@ t = t + dt;
 
 Eu(2) = SSAV_FCH_helpers.compute_E(u_fft, w, Para, Grid);
 Eu_direct(2) = SSAV_FCH_helpers.compute_E_direct(u, u_fft, Para.epsilon, Para.eta1, Grid);
+
+Eu_sym(1) = 0.5*(Eu(2) + SSAV_FCH_helpers.compute_E(2*u_fft - u_old_fft,...
+    2*w - w_old, Para, Grid));
 
 E_t = (Eu(2) - Eu(1)) / dt;
 Et_vals(2) = E_t;
@@ -115,8 +122,8 @@ while t < Time.tf
 
     [a, b, c] = SSAV_FCH_helpers.compute_dt_coeffs(dt, dt_new);
 
-    H = fftn(H_snew);
-    u_snew = fftn(u_snew);
+    H = fftn(H_snew);           num_fft = num_fft + 1;
+    u_snew = fftn(u_snew);      num_fft = num_fft + 1;
 
     r = -(b*w + c*w_old)/a + 0.5 * sum(H_snew .* (b*u + c*u_old)/a, 'all') ...
         * prod(Grid.d);
@@ -125,7 +132,7 @@ while t < Time.tf
         2*Para.tau^2/3) + Para.S) * ifftn(Grid.k4 .* u_snew, 'symmetric') + ...
         r * ifftn(-Grid.k2 .* H, 'symmetric');
 
-    r_hat = fftn(r_hat);
+    r_hat = fftn(r_hat);        num_fft = num_fft + 1;
 
     P = a + P1;
 
@@ -139,17 +146,22 @@ while t < Time.tf
     w_new = 0.5*innprod_Hu + r;
 
     u_new = 0.5*innprod_Hu * psi_H + psi_r;
-    u_new_fft = fftn(u_new);
+    u_new_fft = fftn(u_new);        num_fft = num_fft + 1;
     u_new_fft(1, 1) = mass;         u_new = ifftn(u_new_fft);
 
     E_new = SSAV_FCH_helpers.compute_E(u_new_fft, w_new, Para, Grid);
 
-    E_t = (E_new - Eu(j)) / dt_new;
+    Eu_sym(j) = 0.5*(Eu_new + SSAV_FCH_helpers.compute_E(2*u_new_fft - u_fft,...
+        2*w_new - w, Para, Grid));
+
+    E_t = (Eu_sym(j+1) - Eu_sym(j)) / dt_new;
     Et_vals(j) = E_t;
 
     l = 0;
     if Time.dt_max ~= Time.dt_min
     while E_t > 1e-5 && dt_new > Time.dt_min && l <= 5
+
+        reject_steps = reject_steps + 1;
 
         dt_new = max(gamma * dt_new / 4, Time.dt_min);
         gamma = dt_new / dt;
@@ -159,47 +171,49 @@ while t < Time.tf
         u_snew = SSAV_FCH_helpers.compute_u_snew(u, u_old);
 
         [F, F1, F2] = SSAV_FCH_helpers.compute_F(u_snew, Para.tau);
-    
+
         G = SSAV_FCH_helpers.compute_G(u, Para, F, F1, Grid);
-    
+
         w_snew = SSAV_FCH_helpers.compute_w(G, Para.B);
         % w_snew = (1 + dt_new/dt)*w - (dt_new/dt)*w_old;
-    
+
         H_snew = SSAV_FCH_helpers.compute_H(u_snew, w_snew, Para, F1, F2,...
             Grid);
-    
+
         [a, b, c] = SSAV_FCH_helpers.compute_dt_coeffs(dt, dt_new);
-    
-        H = fftn(H_snew);
-        u_snew = fftn(u_snew);
-    
+
+        H = fftn(H_snew);           num_fft = num_fft + 1;
+        u_snew = fftn(u_snew);      num_fft = num_fft + 1;
+
         r = -(b*w + c*w_old)/a + 0.5 * sum(H_snew .* (b*u + c*u_old)/a, 'all') ...
             * prod(Grid.d);
-    
+
         r_hat = -(b*u + c*u_old) + (Para.epsilon^2*(2 + Para.eta1 + ...
             2*Para.tau^2/3) + Para.S) * ifftn(Grid.k4 .* u_snew, 'symmetric') + ...
             r * ifftn(-Grid.k2 .* H, 'symmetric');
-    
-        r_hat = fftn(r_hat);
-    
+
+        r_hat = fftn(r_hat);        num_fft = num_fft + 1;
+
         P = a + P1;
-    
+
         psi_r = P .\ r_hat;         psi_r = ifftn(psi_r, 'symmetric');
-    
+
         psi_H = P .\ (G .* H);     psi_H = ifftn(psi_H, 'symmetric');
-    
+
         innprod_Hu = SSAV_FCH_helpers.compute_ip(H_snew, psi_r, psi_H, ...
             prod(Grid.d));
-    
+
         w_new = 0.5*innprod_Hu + r;
-    
+
         u_new = 0.5*innprod_Hu * psi_H + psi_r;
-        u_new_fft = fftn(u_new);
+        u_new_fft = fftn(u_new);        num_fft = num_fft + 1;
         u_new_fft(1, 1) = mass;         u_new = ifftn(u_new_fft);
-    
+
         E_new = SSAV_FCH_helpers.compute_E(u_new_fft, w_new, Para, Grid);
 
-        E_t = (E_new - Eu(j)) / dt_new;
+        Eu_sym(j) = 0.5*(Eu_new + SSAV_FCH_helpers.compute_E(2*u_new_fft - u_fft,...
+            2*w_new - w, Para, Grid));
+        E_t = (Eu_sym(j+1) - Eu_sym(j)) / dt_new;
         % Et_vals(j) = E_t;
 
         l = l + 1;
@@ -268,6 +282,7 @@ if Time.dt_max ~= Time.dt_min
     Eu = Eu(1:nt);
     Eu_direct = Eu_direct(1:nt);
     Et_vals = Et_vals(1:nt);
+    Eu_sym = Eu_sym(1:nt);
     t_vals = t_vals(1:nt);
     dt_idx = dt_idx(1:nt-1);
     dt_prop_true = dt_prop_true(1:nt-1);
@@ -276,10 +291,13 @@ end
 
 Results.t_vals = t_vals;
 Results.Eu = Eu;
+Results.Eu_sym = Eu_sym;
 Results.Eu_direct = Eu_direct;
 Results.Et_vals = Et_vals;
 Results.uu = uu;
 Results.dt_idx = dt_idx;
 Results.dt_prop_true = dt_prop_true;
+Results.num_fft = num_fft;
+Results.reject_steps = reject_steps;
 
 end
