@@ -37,6 +37,12 @@ function [u_vals, E_vals, m_vals, diagnostics] = arclength_FCH_func(u0, m0)
 %                       that follows gradient descent (see
 %                       newton_polish_cos below)
 %       t0              initial tangent vector used (increasing-m sign)
+%       stability       1xK vector aligned with m_vals/E_vals: +1 where
+%                       linearly stable under u_t = mu (every eigenvalue
+%                       of the Jacobian, restricted to the
+%                       mass-conserving subspace, has negative real
+%                       part), -1 otherwise. Only the sign is kept, not
+%                       the full spectrum (see extend_branch below).
 %       inc, dec        per-direction diagnostic structs from
 %                       extend_branch (stop_reason, steps, final_ds)
 
@@ -99,7 +105,7 @@ t0 = initialize_t(u, c, eps, eta, Grid);
 % point, then splice the two histories into one continuous array.
 
 ds_start = 1E-6;
-ds_max = 1E-4;
+ds_max = 5E-4;
 max_steps = 10000;
 loop_tol = 20 * ds_max;     % closed-loop detection threshold, in (c,m)-space
 
@@ -110,11 +116,11 @@ loop_tol = 20 * ds_max;     % closed-loop detection threshold, in (c,m)-space
 m_bounds = [0, 1];
 
 fprintf('=== extending in increasing m ===\n');
-[data_inc, uvals_inc, diag_inc] = extend_branch(c, m, u, t0, eps, eta, Grid, N, Nc, ...
+[data_inc, uvals_inc, stab_inc, diag_inc] = extend_branch(c, m, u, t0, eps, eta, Grid, N, Nc, ...
     ds_start, ds_max, max_steps, m_bounds, loop_tol);
 
 fprintf('=== extending in decreasing m ===\n');
-[data_dec, uvals_dec, diag_dec] = extend_branch(c, m, u, -t0, eps, eta, Grid, N, Nc, ...
+[data_dec, uvals_dec, stab_dec, diag_dec] = extend_branch(c, m, u, -t0, eps, eta, Grid, N, Nc, ...
     ds_start, ds_max, max_steps, m_bounds, loop_tol);
 
 % Splice: reversed decreasing branch (from its far end back to the shared
@@ -123,6 +129,7 @@ fprintf('=== extending in decreasing m ===\n');
 % it's already the last column of the first half).
 data = [fliplr(data_dec), data_inc(:, 2:end)];
 u_vals = [fliplr(uvals_dec), uvals_inc(2:end)];
+stability = [fliplr(stab_dec), stab_inc(2:end)];
 
 m_vals = data(1, :);
 E_vals = data(2, :);
@@ -131,6 +138,7 @@ diagnostics = struct( ...
     'gd_resid', gd_resid, ...
     'polish_resid', polish_resid, ...
     't0', t0, ...
+    'stability', stability, ...
     'inc', diag_inc, ...
     'dec', diag_dec);
 
@@ -419,7 +427,7 @@ end
 
 end
 
-function [data_out, u_vals_out, diag] = extend_branch(c, m, u, t, eps, eta, Grid, ...
+function [data_out, u_vals_out, stability_out, diag] = extend_branch(c, m, u, t, eps, eta, Grid, ...
     N, Nc, ds_start, ds_max, max_steps, m_bounds, loop_tol)
 % Extends the FCH continuation branch from (c, m) along tangent t.
 %
@@ -452,6 +460,12 @@ function [data_out, u_vals_out, diag] = extend_branch(c, m, u, t, eps, eta, Grid
 %   - max_steps is reached, or
 %   - ds underflows while retrying a rejected step (a robustness stop).
 %
+% stability_out is a 1xK vector aligned with data_out's columns: +1 where
+% the point is linearly stable under the mass-conserving flow u_t = mu
+% (every eigenvalue of the Jacobian, restricted to the mass-conserving
+% subspace J(2:end,2:end), has negative real part), -1 otherwise. Just the
+% sign is kept, not the full spectrum, to keep this cheap to store.
+%
 % diag is a struct with fields stop_reason (string), steps (number of
 % accepted steps taken), and final_ds (ds at the point extension stopped).
 
@@ -460,6 +474,9 @@ E = SSAV_FCH_helpers.compute_E_direct(u, ck*N, eps, eta, Grid);
 data_out = [m; E];
 u_vals_out = cell(1, 1);
 u_vals_out{1} = u;
+
+J0 = fch_jac_matrix_cos(u, c, eps, eta, Grid);
+stability_out = 2*all(real(eig(J0(2:end,2:end))) < 0) - 1;
 
 c0 = c;
 m0 = m;
@@ -488,6 +505,9 @@ for step = 1:max_steps
         its = 0;
         ndx = 1;
         converged_tight = false;
+        J_final = [];   % Jacobian at the converged point, once we have one --
+                        % reused below for the tangent update and stability
+                        % check instead of rebuilding it from scratch.
 
         while its < 100 && ndx > 1e-6
 
@@ -516,6 +536,11 @@ for step = 1:max_steps
 
             if norm(dx) < 1e-8 && norm(b) < 1e-8
                 converged_tight = true;
+                % One extra Jacobian build here, at the now-converged point
+                % -- this replaces the separate rebuild that used to happen
+                % in the "update tangent" step below and the stability
+                % check, rather than adding a third build on top of them.
+                J_final = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
                 break
             end
             ndx = norm(dx);
@@ -524,6 +549,13 @@ for step = 1:max_steps
         end
 
         success = converged_tight || (ndx <= 1e-6);
+
+        if success && isempty(J_final)
+            % Exited via the loose ndx<=1e-6 threshold rather than the
+            % tight break above -- still need a Jacobian at the converged
+            % point for reuse below.
+            J_final = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
+        end
 
         % Even when Newton nominally converges, severe local
         % ill-conditioning can let it converge onto a completely
@@ -575,6 +607,11 @@ for step = 1:max_steps
     data_out = [data_out, [m; E]];
     u_vals_out{end+1} = u; %#ok<AGROW>
 
+    % Stability at this point: reuse J_final (already built at this exact
+    % (u, c) by the corrector above) instead of rebuilding it.
+    is_stable = all(real(eig(J_final(2:end,2:end))) < 0);
+    stability_out(end+1) = 2*is_stable - 1; %#ok<AGROW>
+
     % Adaptive step-size control based on how many Newton iterations it
     % took, graduated rather than a hard binary grow/shrink -- a step that
     % converges in 9 iterations is "successful but slower than ideal" and
@@ -622,11 +659,11 @@ for step = 1:max_steps
         end
     end
 
-    % update tangent
-    [J, ~] = fch_jac_matrix_cos(u, c, eps, eta, Grid);
+    % update tangent -- reuse J_final (built at this exact (u, c) by the
+    % corrector above) instead of rebuilding the Jacobian a third time.
     Jm = zeros(Nc-1, 1);
     Fm = zeros(1, Nc+1);     Fm(1) = 1; Fm(end) = -1;
-    A = [J(2:end,:), Jm; Fm; [(1/Nc)*t(1:end-1); t(end)]'];
+    A = [J_final(2:end,:), Jm; Fm; [(1/Nc)*t(1:end-1); t(end)]'];
     t = A \ [zeros(Nc, 1); 1];
     t = t / sqrt((1/Nc)*sum(t(1:end-1).^2) + t(end)^2);
 
