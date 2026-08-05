@@ -16,6 +16,7 @@ m = Para.m;         % initial m
 
 % u = compute_u(Grid, m, eps);
 u = Results.uu{end};
+UO = u;
 % nn = ceil(length(u_vals)/2));
 % u = u_vals{nn};
 % m = data(1,nn);
@@ -41,7 +42,7 @@ c = reduce_cos(ck, N);      % restrict to the cosine (even) subspace
 % trivial constant branch instead (this is the "energy locked at -eta/4"
 % failure mode). Pre-relax with a robust (if slower) gradient descent
 % before handing the profile to Newton.
-gd_maxit = 2000;
+gd_maxit = 4000;
 gd_tol = 1e-3;
 [c, gd_resid] = gradient_descent_cos(c, eps, eta, Grid, gd_maxit, gd_tol);
 ck = expand_cos(c, N);
@@ -60,12 +61,12 @@ E = SSAV_FCH_helpers.compute_E_direct(u, ck*N, eps, eta, Grid);       % initial 
 % toward the wrong nearby branch anyway -- initialize_t below instead
 % computes a deterministic tangent from the actual Jacobian at the actual
 % current profile (see its comments), which has neither problem.
-% t0 = rand(Nc+1, 1);
-% if t0(end) < 0
-%     t0 = -t0;
-% end
-% t0 = t0 / norm(t0, 2);
-t0 = initialize_t(u, c, eps, eta, Grid);
+t0 = rand(Nc+1, 1);
+if t0(end) < 0
+      t0 = -t0;
+end
+t0 = t0 / norm(t0, 2);
+% t0 = initialize_t(u, c, eps, eta, Grid);
 
 % ------------------------------------------------------------------------
 % Extend the branch in both directions from the same relaxed starting
@@ -73,23 +74,33 @@ t0 = initialize_t(u, c, eps, eta, Grid);
 
 ds_start = 1E-6;
 ds_max = 1E-4;
-max_steps = 5000;
+max_steps = 10000;
 loop_tol = 20 * ds_max;     % closed-loop detection threshold, in (c,m)-space
+
+% Two-sided bound: folds can send either direction's branch past either
+% boundary (an "increasing m" branch can fold over and start decreasing,
+% and vice versa), so both directions use the same absolute [0, 1] bound
+% rather than a single direction-specific target.
+m_bounds = [-1, 1];
 
 fprintf('=== extending in increasing m ===\n');
 [data_inc, uvals_inc] = extend_branch(c, m, u, t0, eps, eta, Grid, N, Nc, ...
-    ds_start, ds_max, max_steps, [], loop_tol);
+    ds_start, ds_max, max_steps, m_bounds, loop_tol);
 
 fprintf('=== extending in decreasing m ===\n');
 [data_dec, uvals_dec] = extend_branch(c, m, u, -t0, eps, eta, Grid, N, Nc, ...
-    ds_start, ds_max, max_steps, 0, loop_tol);
+    ds_start, ds_max, max_steps, m_bounds, loop_tol);
 
 % Splice: reversed decreasing branch (from its far end back to the shared
 % starting point) followed by the increasing branch forward from the
 % start (the starting point itself is dropped from the second half since
 % it's already the last column of the first half).
+% data = [fliplr(data_dec(:, 2:end)), data_inc(:, 3:end)];
+% u_vals = [fliplr(uvals_dec(:, 2:end)), uvals_inc(3:end)];
 data = [fliplr(data_dec), data_inc(:, 2:end)];
 u_vals = [fliplr(uvals_dec), uvals_inc(2:end)];
+
+
 
 figure;
 plot(data(1,:), data(2,:), 'Linewidth', 3)
@@ -342,7 +353,7 @@ end
 end
 
 function [data_out, u_vals_out] = extend_branch(c, m, u, t, eps, eta, Grid, ...
-    N, Nc, ds_start, ds_max, max_steps, m_stop, loop_tol)
+    N, Nc, ds_start, ds_max, max_steps, m_bounds, loop_tol)
 % Extends the FCH continuation branch from (c, m) along tangent t.
 %
 % Step size is adaptive, keyed off how many Newton iterations the
@@ -355,9 +366,20 @@ function [data_out, u_vals_out] = extend_branch(c, m, u, t, eps, eta, Grid, ...
 %     convergence, shrinks after a slow (>=10 iteration) one, and is left
 %     alone in between.
 %
+% A converged Newton step is also rejected (same quarter-ds retry as an
+% outright failure) if it looks like it landed on the wrong branch: a
+% suspiciously large number of iterations, or a step displacement wildly
+% disproportionate to what was requested/recently seen. Severe local
+% ill-conditioning can let Newton converge to a technically-valid but
+% physically wrong root, and this can happen anywhere along the branch,
+% not just where the history so far has been badly behaved.
+%
 % Stops when:
-%   - m reaches m_stop (pass [] to disable this check -- e.g. there's no
-%     natural mass target when extending toward increasing m), or
+%   - m leaves [m_bounds(1), m_bounds(2)] -- folds can send either
+%     direction's branch past either boundary (an "increasing m" branch
+%     can fold over and start decreasing, and vice versa), so this is
+%     checked as an absolute two-sided bound, not relative to which
+%     direction we started extending in, or
 %   - the branch closes into a loop: the current (c, m) state comes back
 %     within loop_tol of the starting point, after having moved at least
 %     a little way from it first (so this can't fire immediately), or
@@ -376,6 +398,7 @@ ds = ds_start;
 ds_min = ds_start * 1e-2;
 s_accum = 0;
 min_loop_s = 30 * ds_max;
+prev_disp = NaN;    % no reference displacement yet for the very first step
 
 for step = 1:max_steps
 
@@ -431,12 +454,34 @@ for step = 1:max_steps
 
         success = converged_tight || (ndx <= 1e-6);
 
-        if success
+        % Even when Newton nominally converges, severe local
+        % ill-conditioning can let it converge onto a completely
+        % different (wrong) branch instead of the intended nearby point.
+        % Warning sign: the actual displacement is wildly disproportionate
+        % to the requested ds / the last accepted step's displacement
+        % (whichever is larger, so this doesn't false-positive right after
+        % ds has legitimately grown). Iteration count alone isn't used
+        % here -- near a fold, genuinely correct convergence can just take
+        % many iterations, so that on its own isn't a reliable sign of
+        % having landed on the wrong branch. A large jump is treated as a
+        % rejected step, exactly like an outright convergence failure.
+        this_disp = sqrt((1/Nc)*sum((c_curr - c).^2) + (m_curr - m)^2);
+        jump_ref = max(ds, prev_disp);
+        suspicious = success && ~isnan(prev_disp) && this_disp > 10*jump_ref;
+
+        if success && ~suspicious
             accepted = true;
+            prev_disp = this_disp;
         else
-            % Newton failed to converge within the iteration cap -- reject
-            % the step (don't advance), shrink ds, and retry from the same
-            % last-accepted point.
+            if suspicious
+                fprintf(['  extend_branch: rejecting suspicious step at step %d ' ...
+                    '(its=%d, disp=%e vs ref=%e) -- likely branch switch\n'], ...
+                    step, its, this_disp, jump_ref);
+            end
+            % Newton failed to converge within the iteration cap, or the
+            % step looked suspicious above -- reject the step (don't
+            % advance), shrink ds, and retry from the same last-accepted
+            % point.
             ds = ds / 4;
             if ds < ds_min
                 fprintf('  extend_branch: ds underflowed at step %d -- stopping\n', step);
@@ -477,10 +522,13 @@ for step = 1:max_steps
         fprintf('  step %5d: m=%.6f  E=%.6f  its=%3d  ds=%e\n', step, m, E, its, ds);
     end
 
-    % stop at the target mass, if one was given
-    if ~isempty(m_stop) && ...
-            ((m0 > m_stop && m <= m_stop) || (m0 < m_stop && m >= m_stop) || abs(m - m_stop) < 1e-10)
-        fprintf('  extend_branch: reached m_stop=%.4f at step %d\n', m_stop, step);
+    % stop if m has left [m_bounds(1), m_bounds(2)] -- checked as an
+    % absolute two-sided bound (not relative to m0/which direction we
+    % started extending in), since a fold can send either direction's
+    % branch past either boundary.
+    if m <= m_bounds(1) || m >= m_bounds(2)
+        fprintf('  extend_branch: m left [%.4f, %.4f] (m=%.6f) at step %d\n', ...
+            m_bounds(1), m_bounds(2), m, step);
         break
     end
 
