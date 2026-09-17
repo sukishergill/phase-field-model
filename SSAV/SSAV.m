@@ -95,6 +95,7 @@ dt_vals = zeros(1, nmax);
 dt_idx = zeros(1, nmax);
 dt_prop_true = zeros(1, nmax);
 w_vals = zeros(1, nmax);
+l_vals = zeros(1,nmax);
 
 w_vals(1) = w_old;
 
@@ -124,10 +125,10 @@ H = SSAV_helpers.compute_H(f, w_old);
 r = -0.5 * sum(H.*u, 'all') * prod(Grid.d) + w_old;
 H2 = fftn(H);           num_fft = num_fft + 1;
 
-% forcing = SSAV_helpers.compute_forcing(Para.epsilon, Grid.xx, Grid.yy, dt);
+forcing = SSAV_helpers.compute_forcing(Para.epsilon, Grid.xx, Grid.yy, dt);
 
 r_tilde = u/dt - Para.S*(ifftn(G .* u_fft, 'symmetric')) - ...
-    r*(ifftn(G .* H2, 'symmetric'));% + forcing;
+    r*(ifftn(G .* H2, 'symmetric')) + forcing;
 
 r_hat = (Para.alpha*Para.epsilon^2*dt)/(prod(Grid.L)) * ...
     sum(r_tilde, 'all')*prod(Grid.d) + r_tilde;
@@ -198,7 +199,7 @@ if Time.adap == 5
     dt_2 = Para.err_tol(2) / sqrt(abs(E_t)+ Para.delta^2);
 
     [dt_prop, dt_idx(1)] = min([dt_1, dt_2]);
-
+    % dt_prop = dt_1;
 
     [min_dt, dt_prop_true(1)] = min([Time.dt_max, 2*dt, dt_prop]);
 
@@ -261,9 +262,13 @@ while t < Time.tf
     if Time.adap == 5
     while E_t > 1e-8 && dt_new > Time.dt_min && l <= 5
 
+        dt_floor = min(Time.dt_min, 0.1*dt);
+
         reject_steps = reject_steps + 1;
 
-        dt_new = max(gamma * dt_new / 4, Time.dt_min);
+        % dt_new = max(gamma * dt_new / 4, Time.dt_min);
+        % dt_new = max(0.5*dt_new, Time.dt_min);
+        dt_new = max(0.5*dt_new, dt_floor);
         gamma = dt_new / dt;
 
         dt_vals(j) = dt_new;
@@ -289,6 +294,8 @@ while t < Time.tf
 
     end
     end
+
+    l_vals(j+1) = l;
  
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -354,10 +361,14 @@ while t < Time.tf
             dt_2 = Para.err_tol(2) / sqrt(abs(E_t)+ Para.delta^2);
 
             [dt_prop, dt_idx(j)] = min([dt_1, dt_2]);
+            % dt_prop = dt_1;
         
-            [min_dt, dt_prop_true(j)] = min([Time.dt_max, 2*dt, dt_prop]);
+            % [min_dt, dt_prop_true(j)] = min([Time.dt_max, 2*dt, dt_prop]);
 
-            dt_new = max([Time.dt_min, min_dt, 0.1*dt]);
+            min_dt = min(Time.dt_max, max(Time.dt_min, dt_prop));
+            dt_new = min(2*dt, max(0.1*dt, min_dt));
+
+            % dt_new = max([Time.dt_min, min_dt, 0.1*dt]);
         end
     end
 
@@ -412,9 +423,10 @@ if Time.dt_max ~= Time.dt_min
     Eu_sym = Eu_sym(1:nt);
     Et_vals = Et_vals(1:nt);
     t_vals = t_vals(1:nt);
-    dt_idx = dt_idx(1:nt);
-    dt_vals = dt_vals(1:nt);
-    dt_prop_true = dt_prop_true(1:nt);
+    l_vals = l_vals(1:nt);
+    dt_idx = dt_idx(1:nt-1);
+    dt_vals = dt_vals(1:nt-1);
+    dt_prop_true = dt_prop_true(1:nt-1);
     mass = mass(1:nt);
     w_vals = w_vals(1:nt);
 
@@ -429,6 +441,7 @@ Results.Et_vals = Et_vals;
 Results.Em = Em;
 Results.mass = mass;
 Results.t_vals = t_vals;
+Results.l_vals = l_vals;
 Results.num_fft = num_fft;
 Results.reject_steps = reject_steps;
 Results.dt_idx = dt_idx;
