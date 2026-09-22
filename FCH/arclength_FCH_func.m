@@ -1,4 +1,4 @@
-function [u_vals, E_vals, m_vals, diagnostics] = arclength_FCH_func(u0, m0)
+function [u_vals, E_vals, m_vals, diagnostics] = arclength_FCH_func(u0, m0, eps, eta)
 % ARCLENGTH_FCH_FUNC  Pseudo-arclength continuation of FCH steady states.
 %
 % [u_vals, E_vals, m_vals, diagnostics] = arclength_FCH_func(u0, m0)
@@ -46,7 +46,7 @@ function [u_vals, E_vals, m_vals, diagnostics] = arclength_FCH_func(u0, m0)
 %       inc, dec        per-direction diagnostic structs from
 %                       extend_branch (stop_reason, steps, final_ds)
 
-eps = 0.1;      eta = eps^2;
+% eps = 0.1;      eta = eps^2;
 
 % generate grid
 dim = 1;
