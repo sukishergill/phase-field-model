@@ -2,7 +2,9 @@ function E = compute_E(u_fft, w, Para, Grid)
 
 % u_fft = fft2(u_fft);
 if size(u_fft, 2) == 1
-    ux = real(ifftn(-1i*Grid.k.*u_fft));
+    % signed wavenumber: with Grid.k = |k| the ifft is purely imaginary,
+    % so real() would give ux = 0
+    ux = real(ifft(-1i*Grid.kxx.*u_fft));
     du = ux.^2;
 
 else
