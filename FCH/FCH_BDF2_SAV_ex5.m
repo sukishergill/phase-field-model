@@ -19,10 +19,10 @@ Para.zeta = 1;
 Para.delta = 1e-8;
 
 dim = 2;
-L = [2*pi, 2*pi];
+L = [4*pi, 4*pi];
 % L = 2*pi;
 % L = [L, L];
-N = [64, 64];
+N = [128, 128];     % keeps dx = 2*pi/64 at the doubled L
 % N = 2^7;
 Grid = SSAV_FCH_helpers.generate_Grid(L, N, dim);
 

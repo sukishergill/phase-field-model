@@ -41,7 +41,9 @@ function [u, info] = newton_polish_FCH(u0, Grid, Para, opts)
 %   opts  (all optional)
 %     tol           RMS residual tolerance               (1e-9)
 %     maxit         max Newton iterations                (100)
-%     gmres_maxit   max GMRES iterations per solve       (300)
+%     gmres_maxit   max GMRES iterations per solve       (60)
+%                   (capping inexact early PTC solves: 2-5x faster at
+%                   128^2 than 300, same converged states)
 %     eta_max       max GMRES relative tolerance         (0.1)
 %     beta          preconditioner shift                 (1)
 %     phase         use translation phase conditions     (true)
@@ -70,7 +72,7 @@ function [u, info] = newton_polish_FCH(u0, Grid, Para, opts)
 %         plus function handles mu(u) and Jv(u, v) for reuse (e.g. eigs).
 
 if nargin < 4, opts = struct(); end
-opts = set_defaults(opts, struct('tol', 1e-9, 'maxit', 100, 'gmres_maxit', 300, ...
+opts = set_defaults(opts, struct('tol', 1e-9, 'maxit', 100, 'gmres_maxit', 60, ...
     'eta_max', 0.1, 'beta', 1, 'phase', true, 'rank_tol', 1e-8, 'verbose', true, ...
     'ptc', true, 'dtau0', 1, 'dtau_min', 1e-8, 'dtau_max', 1e12, 'dtau_grow', 3, ...
     'stall_tol', 1e-8, 'stall_window', 50, 'even', false));
