@@ -20,7 +20,7 @@ fprintf('   m    Newton  |R| before   |R| after    lambda      E             tim
 for i = 1:nm
     tic;
     [u_polished{i}, infos{i}] = newton_polish_FCH(S.final_u{i}, S.Grids{i}, Para, ...
-        struct('verbose', false));
+        struct('verbose', false, 'maxit', 3000));   % slow coarsening can take ~1000 PTC steps
     info = infos{i};
     flag = '';
     if ~info.converged, flag = '  NOT CONVERGED'; end

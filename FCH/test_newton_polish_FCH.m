@@ -82,7 +82,7 @@ ix = [nx-1:-1:1, nx];  iy = [ny-1:-1:1, ny];
 even_err = max(abs(u_pol - u_pol(:, ix)), [], 'all') + max(abs(u_pol - u_pol(iy, :)), [], 'all');
 pass(inf4.converged && ~inf4.collapsed, 'sweep state converged, not collapsed');
 pass(even_err < 1e-8, sprintf('polished state still even: err %.1e', even_err));
-pass(norm(inf4.sigma(:, end))/sqrt(numel(u0)) < 1e-8, 'sigma -> 0');
+pass(inf4.sigma_rms(end) < 1e-8, 'sigma -> 0');
 pass(abs(mean(u_pol(:)) - mean(u0(:))) < 1e-12, 'mass preserved');
 
 %% 5. shifted, non-even copy
