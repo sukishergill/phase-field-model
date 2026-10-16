@@ -52,7 +52,10 @@ if model == 2
     
 else
     
-    D = -1i*Grid.k;          % AC, CH and OK
+    D = -1i*sqrt(Grid.k2);   % AC, CH and OK -- built from Grid.k2 (Nyquist
+                             % preserved), not Grid.k (Nyquist zeroed):
+                             % D gets squared below and must reproduce G
+                             % exactly at every mode, including Nyquist
 end
 
 % Define operator G
@@ -125,7 +128,13 @@ H = SSAV_helpers.compute_H(f, w_old);
 r = -0.5 * sum(H.*u, 'all') * prod(Grid.d) + w_old;
 H2 = fftn(H);           num_fft = num_fft + 1;
 
-forcing = SSAV_helpers.compute_forcing(Para.epsilon, Grid.xx, Grid.yy, dt);
+if isfield(Para, 'forcing_on')
+    forcing_flag = Para.forcing_on;
+else
+    forcing_flag = 1;      % default: forcing on, matches all existing scripts
+end
+
+forcing = forcing_flag * SSAV_helpers.compute_forcing(Para.epsilon, Grid.xx, Grid.yy, dt);
 
 r_tilde = u/dt - Para.S*(ifftn(G .* u_fft, 'symmetric')) - ...
     r*(ifftn(G .* H2, 'symmetric')) + forcing;

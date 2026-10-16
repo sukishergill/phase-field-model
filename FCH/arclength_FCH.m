@@ -11,29 +11,49 @@
 
 eps = 0.1;      eta = eps^2;
 
+% initialize values
+m = Para.m;         % initial m
+
+% u = compute_u(Grid, m, eps);
+u = Results.uu{end};
+u = u_vals{2};
+m = data(1,2);
 
 % generate grid
 dim = 1;
 L = 2*pi;
-N = 2^7;
+N = numel(u);       % must match whatever grid size Results was generated
+                     % with -- derive it from the data instead of
+                     % hardcoding it, so this can never silently drift out
+                     % of sync with FCH_BDF2_SAV_ex5's own N again.
 Grid = SSAV_FCH_helpers.generate_Grid(L, N, dim);
 Nc = N/2 + 1;       % number of independent cosine (even) Fourier coefficients
 
-% initialize values
-m = 0.01;         % initial m
-
-% u = compute_u(Grid, m, eps);
-u = Results.uu{end};
-u_vals = cell(1001,1);
-u_vals{1} = u;
 ck = fft(u) / N;
 c = reduce_cos(ck, N);      % restrict to the cosine (even) subspace
+
+% The SAV time-stepper's output may not be relaxed all the way to a
+% genuine non-trivial steady state. That matters here more than it might
+% seem: ANY spatially constant profile is an *exact* root of compute_mu,
+% for every value of the mean -- so if the corrector starts too far from
+% the true non-trivial branch, Newton's iteration can converge onto that
+% trivial constant branch instead (this is the "energy locked at -eta/4"
+% failure mode). Pre-relax with a robust (if slower) gradient descent
+% before handing the profile to Newton.
+gd_maxit = 2000;
+gd_tol = 1e-3;
+[c, gd_resid] = gradient_descent_cos(c, eps, eta, Grid, gd_maxit, gd_tol);
+ck = expand_cos(c, N);
+u = real(ifft(ck * N));
+
+u_vals = cell(1001,1);
+u_vals{1} = u;
 
 E = SSAV_FCH_helpers.compute_E_direct(u, ck*N, eps, eta, Grid);       % initial E(u)
 
 data = [m; E];
 
-ds = 1E-4;
+ds = 2E-4;
 
 % initialize tangent vector
 
@@ -68,14 +88,19 @@ end
 % t = zeros(Nc+1, 1);      t(1) = 1;       t(end) = 1;
 
 % t = initialize_t(m, ds, ds, eps, eta, Grid);
-% t = rand(Nc+1, 1);
+t = rand(Nc+1, 1);
 % t = [dck/ds; ds];
 
-t = t / norm(t, 2);         % initial tangent vector
+t = -t / norm(t, 2);         % initial tangent vector
 
 % i = 2;
 
-for i = 1:1000
+for i = 1:12000
+    if i < 3
+        ds = 1E-8;
+    else
+        ds = min(1.5*ds,2.5E-4);
+    end
 
 % compute predictor
 c_curr = c + ds * t(1:end-1);
@@ -87,7 +112,7 @@ u_curr = real(ifft(ck_curr * N));
 its = 0;
 ndx = 1;
 F_curr = compute_mu_cos(c_curr, eps, eta, Grid);
-norm(F_curr)
+
 while its < 100 && ndx > 1e-6
 
     F_curr = compute_mu_cos(c_curr, eps, eta, Grid);
@@ -119,7 +144,7 @@ while its < 100 && ndx > 1e-6
     end
     ndx = norm(dx);
     its = its+1;
-    disp([ndx its])
+
 end
 
 c = c_curr;
@@ -305,4 +330,75 @@ for i = 1:Nc
     J(:,i) = col(:);
     e(i) = 0;
 end
+end
+
+function [c, resid_hist] = gradient_descent_cos(c, eps, eta, Grid, maxit, tol)
+% Semi-implicit ("stabilized") gradient descent toward a genuine FCH
+% steady state at fixed mass, starting from c.
+%
+% compute_mu_cos(c) is (proportional to) the mass-conserving L2 gradient
+% of the energy. Its linear part is 6th-order in derivatives and very
+% stiff (eps^4*k^6), so a naive explicit step would need an impractically
+% tiny dtau for stability. Instead the linear part is treated implicitly
+% -- cheap here since it's diagonal in this cosine/Fourier basis -- while
+% the nonlinear remainder is explicit, with adaptive step-size control:
+% grow dtau on an accepted (energy-decreasing) step, halve and retry on
+% any step that would increase the energy. The mean/mass mode needs no
+% special handling: both the linear operator and compute_mu are
+% structurally zero there (Grid.k2(1)=0), so c(1) never moves.
+
+Nc = Grid.N/2 + 1;
+k2r = Grid.k2(1:Nc);
+Lop = -eps^4*k2r.^3 + eta*eps^2*k2r.^2;
+
+ck = expand_cos(c, Grid.N);
+u = real(ifft(ck * Grid.N));
+E = SSAV_FCH_helpers.compute_E_direct(u, ck*Grid.N, eps, eta, Grid);
+
+dtau = 1e-3;
+dtau_min = 1e-8;
+resid_hist = zeros(maxit, 1);
+
+for it = 1:maxit
+    mu = compute_mu_cos(c, eps, eta, Grid);
+    resid_hist(it) = norm(mu);
+
+    if mod(it, 100) == 0
+        fprintf("  gradient descent it %d: norm(mu)=%e  dtau=%e\n", it, resid_hist(it), dtau);
+    end
+
+    if resid_hist(it) < tol
+        resid_hist = resid_hist(1:it);
+        return
+    end
+
+    % Near a critical point the true energy decrease per step shrinks with
+    % the (already small) residual, and can end up smaller than the
+    % floating-point noise in the energy evaluation itself -- the
+    % step-halving would otherwise shrink dtau toward underflow forever
+    % without making progress. Once dtau bottoms out, stop early and let
+    % Newton (which uses proper second-order information) finish the job
+    % from here rather than wasting iterations.
+    if dtau < dtau_min
+        fprintf("  gradient descent stalled at it %d (dtau underflowed): norm(mu)=%e -- stopping early, handing off to Newton\n", ...
+            it, resid_hist(it));
+        resid_hist = resid_hist(1:it);
+        return
+    end
+
+    c_trial = (c + dtau*(mu - Lop.*c)) ./ (1 - dtau*Lop);
+    ck_trial = expand_cos(c_trial, Grid.N);
+    u_trial = real(ifft(ck_trial * Grid.N));
+    E_trial = SSAV_FCH_helpers.compute_E_direct(u_trial, ck_trial*Grid.N, eps, eta, Grid);
+
+    if E_trial > E
+        dtau = dtau * 0.5;
+        continue
+    end
+
+    c = c_trial;
+    E = E_trial;
+    dtau = dtau * 1.1;
+end
+
 end

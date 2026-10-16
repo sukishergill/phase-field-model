@@ -1,5 +1,12 @@
 function Results = FCH_BDF2_SAV(Grid, Time, Para, u, plt_save)
 
+% Callers commonly pass plt_save = Time.tf/10, which is only an integer
+% when Time.tf happens to be a clean multiple of 10 -- e.g. Time.tf = 1
+% gives plt_save = 0.1, and cell(plt_save+1, 1) below then errors ("Size
+% inputs must be integers"). Round defensively here so this function
+% can't crash regardless of what Time.tf the caller uses.
+plt_save = max(1, round(plt_save));
+
 dt = Time.dt_min;
 t = Time.t0;
 
@@ -9,7 +16,19 @@ reject_steps = 0;
 mass = sum(u, 'all');
 
 % define number of time steps and time steps for plotting purposes
-nmax = round(Time.tf / Time.dt_min)/100;
+% This must be a guaranteed upper bound on the number of steps, not a
+% typical-case guess: every accepted step advances t by at least
+% Time.dt_min, so Time.tf/Time.dt_min steps can never be exceeded no
+% matter how the adaptive step-size control behaves. The previous
+% /100 scaling assumed steps would average close to Time.dt_max, which
+% isn't always true (e.g. a stretch spent near Time.dt_min) and led to
+% Eu_sym(j+1) indexing past the end of the preallocated arrays.
+% Note this is a bound on the number of STEPS, but the arrays are indexed
+% as e.g. Eu_sym(j+1) -- one slot beyond the step count is needed, plus
+% the initial condition already occupies a slot or two before the loop
+% even starts -- so pad with a small safety margin rather than the exact
+% (fiddlier to derive) off-by-one count.
+nmax = round(Time.tf / Time.dt_min) + 10;
 
 plt = linspace(0, Time.tf, plt_save + 1);
 plt_idx = 2;
@@ -275,6 +294,16 @@ while t < Time.tf
 
 
 end
+
+% The last plotting checkpoint is plt(end) = Time.tf exactly, but the
+% end-of-run logic above can break out of the loop with t just short of
+% Time.tf (when the remaining gap is smaller than Time.dt_min), so
+% "t >= plt(plt_idx)" may never fire for the final checkpoint. Without
+% this, uu{end} would be left at its preallocated zeros(...) placeholder
+% instead of the actual final profile. Write the true final state
+% unconditionally so this can't happen.
+uu{end} = u;
+u_t_vals(end) = t;
 
 if Time.dt_max ~= Time.dt_min
 

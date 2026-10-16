@@ -43,6 +43,14 @@ function [u_vals, E_vals, m_vals, diagnostics] = arclength_FCH_func(u0, m0, eps,
 %                       mass-conserving subspace, has negative real
 %                       part), -1 otherwise. Only the sign is kept, not
 %                       the full spectrum (see extend_branch below).
+%       max_eig         1xK vector aligned with m_vals/E_vals: the largest
+%                       real part of the eigenvalues of the Jacobian
+%                       (restricted to the mass-conserving subspace) at
+%                       each point. stability is just sign(max_eig) (with
+%                       0 treated as stable); max_eig is kept too so a
+%                       "-1" flag that's actually just numerical noise
+%                       (e.g. 1e-10) can be told apart from a genuine
+%                       instability (e.g. 1e-3 or larger).
 %       inc, dec        per-direction diagnostic structs from
 %                       extend_branch (stop_reason, steps, final_ds)
 
@@ -116,11 +124,11 @@ loop_tol = 20 * ds_max;     % closed-loop detection threshold, in (c,m)-space
 m_bounds = [0, 1];
 
 fprintf('=== extending in increasing m ===\n');
-[data_inc, uvals_inc, stab_inc, diag_inc] = extend_branch(c, m, u, t0, eps, eta, Grid, N, Nc, ...
+[data_inc, uvals_inc, stab_inc, maxeig_inc, diag_inc] = extend_branch(c, m, u, t0, eps, eta, Grid, N, Nc, ...
     ds_start, ds_max, max_steps, m_bounds, loop_tol);
 
 fprintf('=== extending in decreasing m ===\n');
-[data_dec, uvals_dec, stab_dec, diag_dec] = extend_branch(c, m, u, -t0, eps, eta, Grid, N, Nc, ...
+[data_dec, uvals_dec, stab_dec, maxeig_dec, diag_dec] = extend_branch(c, m, u, -t0, eps, eta, Grid, N, Nc, ...
     ds_start, ds_max, max_steps, m_bounds, loop_tol);
 
 % Splice: reversed decreasing branch (from its far end back to the shared
@@ -130,6 +138,7 @@ fprintf('=== extending in decreasing m ===\n');
 data = [fliplr(data_dec), data_inc(:, 2:end)];
 u_vals = [fliplr(uvals_dec), uvals_inc(2:end)];
 stability = [fliplr(stab_dec), stab_inc(2:end)];
+max_eig = [fliplr(maxeig_dec), maxeig_inc(2:end)];
 
 m_vals = data(1, :);
 E_vals = data(2, :);
@@ -139,6 +148,7 @@ diagnostics = struct( ...
     'polish_resid', polish_resid, ...
     't0', t0, ...
     'stability', stability, ...
+    'max_eig', max_eig, ...
     'inc', diag_inc, ...
     'dec', diag_dec);
 
@@ -427,7 +437,7 @@ end
 
 end
 
-function [data_out, u_vals_out, stability_out, diag] = extend_branch(c, m, u, t, eps, eta, Grid, ...
+function [data_out, u_vals_out, stability_out, max_eig_out, diag] = extend_branch(c, m, u, t, eps, eta, Grid, ...
     N, Nc, ds_start, ds_max, max_steps, m_bounds, loop_tol)
 % Extends the FCH continuation branch from (c, m) along tangent t.
 %
@@ -465,6 +475,9 @@ function [data_out, u_vals_out, stability_out, diag] = extend_branch(c, m, u, t,
 % (every eigenvalue of the Jacobian, restricted to the mass-conserving
 % subspace J(2:end,2:end), has negative real part), -1 otherwise. Just the
 % sign is kept, not the full spectrum, to keep this cheap to store.
+% max_eig_out is the corresponding largest real part of that spectrum, so
+% a -1 flag driven by numerical noise near zero can be distinguished from
+% a genuine instability.
 %
 % diag is a struct with fields stop_reason (string), steps (number of
 % accepted steps taken), and final_ds (ds at the point extension stopped).
@@ -476,7 +489,8 @@ u_vals_out = cell(1, 1);
 u_vals_out{1} = u;
 
 J0 = fch_jac_matrix_cos(u, c, eps, eta, Grid);
-stability_out = 2*all(real(eig(J0(2:end,2:end))) < 0) - 1;
+max_eig_out = max(real(eig(J0(2:end,2:end))));
+stability_out = 2*(max_eig_out < 1e-8) - 1;
 
 c0 = c;
 m0 = m;
@@ -609,8 +623,9 @@ for step = 1:max_steps
 
     % Stability at this point: reuse J_final (already built at this exact
     % (u, c) by the corrector above) instead of rebuilding it.
-    is_stable = all(real(eig(J_final(2:end,2:end))) < 0);
-    stability_out(end+1) = 2*is_stable - 1; %#ok<AGROW>
+    this_max_eig = max(real(eig(J_final(2:end,2:end))));
+    max_eig_out(end+1) = this_max_eig; %#ok<AGROW>
+    stability_out(end+1) = 2*(this_max_eig < 0) - 1; %#ok<AGROW>
 
     % Adaptive step-size control based on how many Newton iterations it
     % took, graduated rather than a hard binary grow/shrink -- a step that

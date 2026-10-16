@@ -16,7 +16,7 @@
 L = 4*pi;
 N = 128;
 Grid = SSAV_FCH_helpers.generate_Grid(L, N, 1);
-m0 = 0.3;
+m0 = 0.1;
 eps = 0.1;      eta = eps^2;
 
 K = 1:11;
@@ -31,7 +31,7 @@ for idx = 1:numel(K)
     fprintf('\n\n===================== k = %d =====================\n', k);
 
     rng(k);     % reproducible per-k random seed
-    u0 = m0 + 0.00*(rand(N, 1) - 0.5) + .95*(1-m0)*cos(k*2*pi*Grid.x/L);
+    u0 = m0 + 0*(rand(N, 1) - 0.5) + .95*(1-m0)*cos(k*2*pi*Grid.x/L);
     u0 = u0 - mean(u0) + m0;    % force exact mass = m0
 
     try
