@@ -1,7 +1,7 @@
 % Run FCH_BDF2_SAV_ex5 for each mass m in m_vals (in parallel) and plot the
 % final profile of every run in one figure.
 
-m_vals = 0:0.1:0.8;
+m_vals = 0.05:0.1:0.85;    % m = 0 avoided: its unstable band is a narrow sliver
 nm = numel(m_vals);
 
 final_u = cell(nm, 1);
@@ -33,7 +33,7 @@ for i = 1:nm
         axis equal tight off;
         colorbar;
     end
-    title(['$m = $', num2str(m_vals(i))], 'Interpreter', 'latex')
+    title(sprintf('$m = %.2f$', m_vals(i)), 'Interpreter', 'latex')
 end
 
 function [u_final, Grid, energy, Time] = run_ex5(m_override) %#ok<INUSD> read by the script via exist()
