@@ -45,7 +45,17 @@ u_fft = fftn(u);        num_fft = num_fft + 1;
 
 Eu = zeros(1, nmax);
 Eu_sym = zeros(1, nmax);
-Eu_direct = zeros(1, nmax);
+% The direct energy is a diagnostic only (the step-size control uses the
+% SAV energy Eu), and computing it every step costs ~13% of the run.
+% Sample it every Para.E_direct_every accepted steps (1 = every step),
+% plus the start and the final state; t_direct holds the matching times.
+if isfield(Para, 'E_direct_every')
+    E_direct_every = Para.E_direct_every;
+else
+    E_direct_every = 100;
+end
+Eu_direct = zeros(1, ceil(nmax / E_direct_every) + 3);
+t_direct = zeros(1, numel(Eu_direct));
 Et_vals = zeros(1, nmax);
 t_vals = zeros(1, nmax);
 dt_idx = zeros(1, nmax);
@@ -67,6 +77,8 @@ w_old = SSAV_FCH_helpers.compute_w(G, Para.B);
 
 Eu(1) = SSAV_FCH_helpers.compute_E(u_fft, w_old, Para, Grid);
 Eu_direct(1) = SSAV_FCH_helpers.compute_E_direct(u, u_fft, Para.epsilon, Para.eta1, Grid);
+t_direct(1) = t;
+n_direct = 1;
 
 H = SSAV_FCH_helpers.compute_H(u, w_old, Para, F1, F2, Grid);
 H_old = H;
@@ -102,7 +114,9 @@ u_fft(1, 1) = mass;         u = ifftn(u_fft);
 t = t + dt;
 
 Eu(2) = SSAV_FCH_helpers.compute_E(u_fft, w, Para, Grid);
+n_direct = 2;
 Eu_direct(2) = SSAV_FCH_helpers.compute_E_direct(u, u_fft, Para.epsilon, Para.eta1, Grid);
+t_direct(2) = t;
 
 Eu_sym(1) = 0.5*(Eu(2) + SSAV_FCH_helpers.compute_E(2*u_fft - u_old_fft,...
     2*w - w_old, Para, Grid));
@@ -173,7 +187,7 @@ while t < Time.tf
     Eu_sym(j) = 0.5*(E_new + SSAV_FCH_helpers.compute_E(2*u_new_fft - u_fft,...
         2*w_new - w, Para, Grid));
 
-    E_t = (Eu_sym(j+1) - Eu_sym(j)) / dt_new;
+    E_t = (Eu_sym(j) - Eu_sym(j-1)) / dt_new;
     Et_vals(j) = E_t;
 
     l = 0;
@@ -232,7 +246,7 @@ while t < Time.tf
 
         Eu_sym(j) = 0.5*(E_new + SSAV_FCH_helpers.compute_E(2*u_new_fft - u_fft,...
             2*w_new - w, Para, Grid));
-        E_t = (Eu_sym(j+1) - Eu_sym(j)) / dt_new;
+        E_t = (Eu_sym(j) - Eu_sym(j-1)) / dt_new;
         % Et_vals(j) = E_t;
 
         l = l + 1;
@@ -264,8 +278,12 @@ while t < Time.tf
 
     t = t + dt;
     Eu(j + 1) = E_new;
-    Eu_direct(j + 1) = SSAV_FCH_helpers.compute_E_direct(u_new, u_new_fft, ...
-        Para.epsilon, Para.eta1, Grid);
+    if mod(j, E_direct_every) == 0
+        n_direct = n_direct + 1;
+        Eu_direct(n_direct) = SSAV_FCH_helpers.compute_E_direct(u_new, u_new_fft, ...
+            Para.epsilon, Para.eta1, Grid);
+        t_direct(n_direct) = t;
+    end
     Et_vals(j + 1) = E_t;
 
     w_old = w;                      w = w_new;
@@ -305,11 +323,19 @@ end
 uu{end} = u;
 u_t_vals(end) = t;
 
+if t_direct(n_direct) < t
+    n_direct = n_direct + 1;
+    Eu_direct(n_direct) = SSAV_FCH_helpers.compute_E_direct(u, fftn(u), ...
+        Para.epsilon, Para.eta1, Grid);
+    t_direct(n_direct) = t;
+end
+Eu_direct = Eu_direct(1:n_direct);
+t_direct = t_direct(1:n_direct);
+
 if Time.dt_max ~= Time.dt_min
 
     nt = sum(t_vals > 0) + 1;
     Eu = Eu(1:nt);
-    Eu_direct = Eu_direct(1:nt);
     Et_vals = Et_vals(1:nt);
     Eu_sym = Eu_sym(1:nt);
     t_vals = t_vals(1:nt);
@@ -322,6 +348,7 @@ Results.t_vals = t_vals;
 Results.Eu = Eu;
 Results.Eu_sym = Eu_sym;
 Results.Eu_direct = Eu_direct;
+Results.t_direct = t_direct;
 Results.Et_vals = Et_vals;
 Results.uu = uu;
 Results.dt_idx = dt_idx;
