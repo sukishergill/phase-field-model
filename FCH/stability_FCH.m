@@ -22,6 +22,8 @@ function [lam, modes, info] = stability_FCH(u, Grid, Para, opts)
 %     method   'auto', 'dense' or 'eigs'                   ('auto')
 %     neg_tol  eigenvalues below -neg_tol count as negative (1e-6)
 %     beta     preconditioner shift (eigs)                 (1)
+%     even_only  restrict to perturbations even in x and y  (false)
+%              (translations are odd, so none are excluded)
 %     verbose  print a summary                             (true)
 %
 % Outputs
@@ -34,7 +36,8 @@ function [lam, modes, info] = stability_FCH(u, Grid, Para, opts)
 %          Ritz values)
 
 if nargin < 4, opts = struct(); end
-defaults = struct('k', 6, 'method', 'auto', 'neg_tol', 1e-6, 'beta', 1, 'verbose', true);
+defaults = struct('k', 6, 'method', 'auto', 'neg_tol', 1e-6, 'beta', 1, ...
+    'even_only', false, 'verbose', true);
 names = fieldnames(defaults);
 for i = 1:numel(names)
     if ~isfield(opts, names{i}), opts.(names{i}) = defaults.(names{i}); end
@@ -50,22 +53,37 @@ end
 % Jacobian and translation directions at u, from the Newton solver
 [~, ninfo] = newton_polish_FCH(u, Grid, Para, struct('maxit', 0, 'verbose', false));
 Jv = @(v) reshape(ninfo.Jv(u, reshape(v, sz)), n, 1);
-T = reshape(ninfo.T, n, []);
-Q = orth([ones(n, 1), T]);          % excluded directions: mean + translations
-proj = @(v) v - Q*(Q'*v);
-k = min(opts.k, n - size(Q, 2));
+if opts.even_only
+    % allowed subspace: even, mean zero. Translation directions are odd,
+    % so they are already outside it.
+    [~, asym] = SSAV_FCH_helpers.symmetrize_even(u);
+    if asym > 1e-6
+        warning('stability_FCH:even', 'u is not even (relative asymmetry %.1e)', asym);
+    end
+    T = zeros(n, 0);
+    Q = ones(n, 1) / sqrt(n);
+    sym = @(V) reshape(SSAV_FCH_helpers.symmetrize_even(reshape(V, [sz, size(V, 2)])), n, []);
+    proj = @(V) sym(V) - Q*(Q'*sym(V));
+    Z = even_basis(sz);                         % orthonormal, even, mean zero
+    n_allowed = size(Z, 2);
+else
+    T = reshape(ninfo.T, n, []);
+    Q = orth([ones(n, 1), T]);      % excluded directions: mean + translations
+    proj = @(v) v - Q*(Q'*v);
+    n_allowed = n - size(Q, 2);
+end
+k = min(opts.k, n_allowed);
 
 switch method
     case 'dense'
-        J = zeros(n);
-        e = zeros(n, 1);
-        for j = 1:n
-            e(j) = 1;
-            J(:, j) = Jv(e);
-            e(j) = 0;
+        if ~opts.even_only
+            Z = null(Q');                   % orthonormal basis of the allowed subspace
         end
-        Z = null(Q');                       % orthonormal basis of the allowed subspace
-        Jr = Z' * J * Z;
+        JZ = zeros(n, size(Z, 2));
+        for j = 1:size(Z, 2)
+            JZ(:, j) = Jv(Z(:, j));
+        end
+        Jr = Z' * JZ;
         [W, L] = eig((Jr + Jr')/2);
         [lam, ord] = sort(diag(L));
         lam = lam(1:k);
@@ -77,13 +95,18 @@ switch method
         Pmh_sym = 1 ./ (Para.epsilon^2*Grid.k2 + opts.beta);
         Pmh = @(v) reshape(real(ifftn(Pmh_sym .* fftn(reshape(v, sz)))), n, 1);
         % constraint Q'd = 0 on d = P^{-1/2} w  <=>  (P^{-1/2} Q)' w = 0
+        % (P^{-1/2} commutes with the reflections, so even stays even)
         Qt = orth(cell2mat(arrayfun(@(c) Pmh(Q(:, c)), 1:size(Q, 2), 'UniformOutput', false)));
-        projt = @(w) w - Qt*(Qt'*w);
+        if opts.even_only
+            projt = @(w) sym(w) - Qt*(Qt'*sym(w));
+        else
+            projt = @(w) w - Qt*(Qt'*w);
+        end
         % shift the excluded directions above the wanted (small) end of the
         % spectrum; keep it modest -- a large shift stretches the spectrum
         % and stalls Lanczos (1e3 failed to converge at 64^2)
         shift = 1;
-        B = @(w) projt(Pmh(Jv(Pmh(projt(w))))) + shift*(Qt*(Qt'*w));
+        B = @(w) projt(Pmh(Jv(Pmh(projt(w))))) + shift*(w - projt(w));
         % name-value pairs: a struct here is read as eigs' old-style
         % options (tol, issym, ...) and these settings would be ignored
         [W, L, flag] = eigs(B, n, k, 'smallestreal', 'IsFunctionSymmetric', true, ...
@@ -110,7 +133,7 @@ switch method
         error('stability_FCH: unknown method ''%s''', method);
 end
 
-% unit RMS, mean zero, orthogonal to translations
+% unit RMS, mean zero, orthogonal to translations (even mode: even)
 D = proj(D);
 D = D ./ (vecnorm(D) / sqrt(n));
 rayleigh = zeros(k, 1);
@@ -120,6 +143,7 @@ end
 modes = reshape(D, [sz, k]);
 
 info.method = method;
+info.even_only = opts.even_only;
 info.n_translations = size(T, 2);
 info.n_neg = sum(lam < -opts.neg_tol);
 info.n_near_zero = sum(abs(lam) <= opts.neg_tol);
@@ -129,8 +153,12 @@ info.converged = eigs_converged;
 
 if opts.verbose
     if info.stable, verdict = 'STABLE'; else, verdict = 'UNSTABLE'; end
-    fprintf('stability (%s, %d translation dir(s) excluded): %s, %d negative', ...
-        method, info.n_translations, verdict, info.n_neg);
+    if opts.even_only
+        fprintf('stability (%s, even perturbations only): %s, %d negative', method, verdict, info.n_neg);
+    else
+        fprintf('stability (%s, %d translation dir(s) excluded): %s, %d negative', ...
+            method, info.n_translations, verdict, info.n_neg);
+    end
     if info.n_near_zero > 0
         fprintf(', %d near zero (marginal)', info.n_near_zero);
     end
@@ -139,4 +167,25 @@ if opts.verbose
     end
     fprintf('\n  smallest eigenvalues: %s\n', mat2str(lam', 3));
 end
+end
+
+function Z = even_basis(sz)
+% Orthonormal basis of mean-zero functions even in x and y on the grid:
+% one normalized indicator per reflection orbit of grid points, then the
+% constant removed. About (N/2+1)^2 columns in 2D.
+ny = sz(1);  nx = sz(2);
+ix = [nx-1:-1:1, nx];
+iy = [ny-1:-1:1, ny];
+[C, R] = meshgrid(1:nx, 1:ny);
+if nx == 1
+    orbit = min(sub2ind(sz, R, C), sub2ind(sz, iy(R), C));
+else
+    orbit = min(cat(3, sub2ind(sz, R, C), sub2ind(sz, iy(R), C), ...
+        sub2ind(sz, R, ix(C)), sub2ind(sz, iy(R), ix(C))), [], 3);
+end
+[~, ~, lab] = unique(orbit(:));
+Z0 = sparse(1:numel(lab), lab, 1);
+Z0 = Z0 ./ sqrt(sum(Z0, 1));            % orthonormal orbit indicators
+c = full(Z0' * ones(size(Z0, 1), 1));   % constant in orbit coordinates
+Z = full(Z0) * null(c');                % remove the mean
 end

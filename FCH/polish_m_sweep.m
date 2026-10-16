@@ -18,26 +18,28 @@ u_polished = cell(nm, 1);
 infos = cell(nm, 1);
 hists = cell(nm, 1);
 
-% polish, check stability, and descend from saddles to a stable state
-fprintf('   m    E first polish   neg   E final          neg  rounds  time%s\n', '');
+% Polish, check stability, and descend from saddles to a stable state.
+% even_only: stay with even states (stable = stable to even perturbations)
+even_only = true;
+fprintf('   m    dE first polish  neg   dE final         neg  rounds  time%s\n', '');
 for i = 1:nm
     tic;
     [u_polished{i}, hists{i}, infos{i}] = descend_FCH(S.final_u{i}, S.Grids{i}, Para, ...
-        struct('verbose', false));
+        struct('verbose', false, 'even_only', even_only));
     h = hists{i};
     flag = '';
     if ~infos{i}.converged, flag = '  NOT CONVERGED'; end
     if h(end).n_neg > 0, flag = [flag '  STILL UNSTABLE']; end
     if infos{i}.collapsed, flag = [flag '  COLLAPSED']; end
     fprintf('  %.1f   %+.10f  %2d    %+.10f  %2d   %3d   %5.1fs%s\n', m_vals(i), ...
-        h(1).E, h(1).n_neg, h(end).E, h(end).n_neg, numel(h) - 1, toc, flag);
+        h(1).dE, h(1).n_neg, h(end).dE, h(end).n_neg, numel(h) - 1, toc, flag);
 end
 
 % drop the function handles before saving (they capture the whole workspace)
 infos_save = cellfun(@(s) rmfield(s, {'mu', 'Jv'}), infos, 'UniformOutput', false);
 [~, base] = fileparts(in_file);
 out_file = [base '_polished.mat'];
-save(out_file, 'm_vals', 'u_polished', 'infos_save', 'hists', 'Para', 'in_file');
+save(out_file, 'm_vals', 'u_polished', 'infos_save', 'hists', 'Para', 'in_file', 'even_only');
 fprintf('Saved polished states to %s\n', out_file);
 
 %% Plot all polished states
@@ -54,5 +56,5 @@ for i = 1:nm
         axis equal tight off;
         colorbar;
     end
-    title(sprintf('$m = %.1f$, $E = %.6f$', m_vals(i), infos{i}.E), 'Interpreter', 'latex')
+    title(sprintf('$m = %.1f$, $\\Delta E = %.6f$', m_vals(i), infos{i}.dE), 'Interpreter', 'latex')
 end

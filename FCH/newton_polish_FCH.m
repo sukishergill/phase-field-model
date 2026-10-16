@@ -55,6 +55,8 @@ function [u, info] = newton_polish_FCH(u0, Grid, Para, opts)
 %     dtau_grow     max growth of dtau per accepted step (3)
 %     stall_tol     accept a stalled residual below this     (1e-8)
 %     stall_window  iterations without halving = stalled     (50)
+%     even          keep u even in x and y (symmetrize u0 and
+%                   every accepted iterate)                  (false)
 %
 % Outputs
 %   u     polished state
@@ -63,6 +65,7 @@ function [u, info] = newton_polish_FCH(u0, Grid, Para, opts)
 %         dtau_hist, accepted, sigma_rms (phase-condition multipliers on the
 %         RMS scale of the residual; -> 0 at a solution),
 %         lambda, E (energy consistent with mu), E_direct (compute_E_direct),
+%         E_uniform (energy of u = m), dE = E - E_uniform,
 %         T (translation directions of the final state), gram_eigs, collapsed,
 %         plus function handles mu(u) and Jv(u, v) for reuse (e.g. eigs).
 
@@ -70,13 +73,24 @@ if nargin < 4, opts = struct(); end
 opts = set_defaults(opts, struct('tol', 1e-9, 'maxit', 100, 'gmres_maxit', 300, ...
     'eta_max', 0.1, 'beta', 1, 'phase', true, 'rank_tol', 1e-8, 'verbose', true, ...
     'ptc', true, 'dtau0', 1, 'dtau_min', 1e-8, 'dtau_max', 1e12, 'dtau_grow', 3, ...
-    'stall_tol', 1e-8, 'stall_window', 50));
+    'stall_tol', 1e-8, 'stall_window', 50, 'even', false));
 
 eps2 = Para.epsilon^2;
 sz = size(u0);
 n = numel(u0);
 m = mean(u0(:));
 rms = @(v) norm(v(:)) / sqrt(numel(v));
+
+% even mode: keep u even in x and y. A Newton step from an even state is
+% even in exact arithmetic, but PTC follows the flow and amplifies roundoff
+% asymmetry near saddles whose unstable modes are odd (~1e-3 in the Ex5
+% sweep), so re-symmetrize every accepted iterate.
+if opts.even
+    [u0, asym0] = SSAV_FCH_helpers.symmetrize_even(u0);
+    if opts.verbose && asym0 > 1e-6
+        fprintf('even mode: removed relative asymmetry %.1e from u0\n', asym0);
+    end
+end
 
 lap = @(v) real(ifftn(-Grid.k2 .* fftn(v)));
 mu_fun = @(u) compute_mu(u, Para, lap);
@@ -197,6 +211,12 @@ for it = 1:opts.maxit
         eta_k = min(opts.eta_max, eta_new);
 
         u = u_try;  R = R_try;  g = g_try;  res = res_try;  E = E_try;
+        if opts.even
+            u = SSAV_FCH_helpers.symmetrize_even(u);
+            [R, g] = residual(u);
+            res = rms([R(:); g]);
+            E = energy(u, Para, lap);
+        end
 
         % Re-anchor the phase conditions at the current state. PTC can
         % reshape the pattern so much that the starting state's translation
@@ -261,6 +281,9 @@ info.lambda = mean(mu(:));
 % derivatives, so it differs at the ~1e-9 level.
 info.E = energy(u, Para, lap);
 info.E_direct = SSAV_FCH_helpers.compute_E_direct(u, fftn(u), Para.epsilon, Para.eta1, Grid);
+% energy relative to the uniform state u = m (same energy functional)
+info.E_uniform = energy(m*ones(sz), Para, lap);
+info.dE = info.E - info.E_uniform;
 info.T = reshape(T, [sz, p]);
 info.gram_eigs = gram_eigs;
 % the constant state u = m solves mu = const for every m; flag a collapse
@@ -270,7 +293,8 @@ info.Jv = Jv_fun;
 
 if opts.verbose
     if info.converged
-        fprintf('Converged: |R|_rms = %.2e, lambda = %.6f, E = %.10f\n', res, info.lambda, info.E);
+        fprintf('Converged: |R|_rms = %.2e, lambda = %.6f, E = %.10f, dE = %.10f\n', ...
+            res, info.lambda, info.E, info.dE);
     else
         fprintf('NOT converged: |R|_rms = %.2e after %d iterations\n', res, numel(info.res_hist) - 1);
     end

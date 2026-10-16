@@ -12,6 +12,8 @@ function [u, hist, pinfo] = descend_FCH(u, Grid, Para, opts)
 %   u, Grid, Para  as for newton_polish_FCH (u should be polished)
 %   opts (optional)
 %     delta        RMS size of the push along the unstable mode (0.02)
+%     even_only    only even states/modes (stable = stable to even
+%                  perturbations; may be a saddle in the full space) (false)
 %     max_rounds   max saddle-escape rounds                     (10)
 %     polish_opts  options passed to newton_polish_FCH  (maxit 3000, quiet)
 %     stab_opts    options passed to stability_FCH      (quiet)
@@ -19,27 +21,31 @@ function [u, hist, pinfo] = descend_FCH(u, Grid, Para, opts)
 %
 % Outputs
 %   u     final state (stable unless max_rounds ran out or a polish failed)
-%   hist  struct array per round: E, n_neg, lam (smallest eigenvalues)
+%   hist  struct array per round: E, dE (E - E_uniform), n_neg, lam
 %   pinfo newton_polish_FCH info for the final state
 
 if nargin < 4, opts = struct(); end
-defaults = struct('delta', 0.02, 'max_rounds', 10, ...
+defaults = struct('delta', 0.02, 'max_rounds', 10, 'even_only', false, ...
     'polish_opts', struct('verbose', false, 'maxit', 3000), ...
     'stab_opts', struct('verbose', false), 'verbose', true);
 names = fieldnames(defaults);
 for i = 1:numel(names)
     if ~isfield(opts, names{i}), opts.(names{i}) = defaults.(names{i}); end
 end
+% even_only: stay in the even subspace -- only even unstable modes are
+% followed, and polishing re-symmetrizes every iterate
+opts.polish_opts.even = opts.even_only;
+opts.stab_opts.even_only = opts.even_only;
 
 [u, pinfo] = newton_polish_FCH(u, Grid, Para, opts.polish_opts);
-hist = struct('E', {}, 'n_neg', {}, 'lam', {});
+hist = struct('E', {}, 'dE', {}, 'n_neg', {}, 'lam', {});
 
 for round = 1:opts.max_rounds + 1
     [lam, modes, sinfo] = stability_FCH(u, Grid, Para, opts.stab_opts);
-    hist(end+1) = struct('E', pinfo.E, 'n_neg', sinfo.n_neg, 'lam', lam); %#ok<AGROW>
+    hist(end+1) = struct('E', pinfo.E, 'dE', pinfo.dE, 'n_neg', sinfo.n_neg, 'lam', lam); %#ok<AGROW>
     if opts.verbose
-        fprintf('  round %d: E = %+.10f, %d negative eigenvalue(s), smallest %s\n', ...
-            round - 1, pinfo.E, sinfo.n_neg, mat2str(lam(1:min(3, end))', 3));
+        fprintf('  round %d: dE = %+.10f, %d negative eigenvalue(s), smallest %s\n', ...
+            round - 1, pinfo.dE, sinfo.n_neg, mat2str(lam(1:min(3, end))', 3));
     end
     if sinfo.stable || round > opts.max_rounds
         break
