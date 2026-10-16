@@ -53,10 +53,13 @@ function [u, info] = newton_polish_FCH(u0, Grid, Para, opts)
 %     dtau_min      give up below this pseudo-time step  (1e-8)
 %     dtau_max      cap on the pseudo-time step          (1e12)
 %     dtau_grow     max growth of dtau per accepted step (3)
+%     stall_tol     accept a stalled residual below this     (1e-8)
+%     stall_window  iterations without halving = stalled     (50)
 %
 % Outputs
 %   u     polished state
-%   info  struct: converged, res_hist, E_hist, gmres_its, step_hist,
+%   info  struct: converged (res < tol, or stalled below stall_tol),
+%         stalled, res_hist, E_hist, gmres_its, step_hist,
 %         dtau_hist, accepted, sigma_rms (phase-condition multipliers on the
 %         RMS scale of the residual; -> 0 at a solution),
 %         lambda, E (energy consistent with mu), E_direct (compute_E_direct),
@@ -66,7 +69,8 @@ function [u, info] = newton_polish_FCH(u0, Grid, Para, opts)
 if nargin < 4, opts = struct(); end
 opts = set_defaults(opts, struct('tol', 1e-9, 'maxit', 100, 'gmres_maxit', 300, ...
     'eta_max', 0.1, 'beta', 1, 'phase', true, 'rank_tol', 1e-8, 'verbose', true, ...
-    'ptc', true, 'dtau0', 1, 'dtau_min', 1e-8, 'dtau_max', 1e12, 'dtau_grow', 3));
+    'ptc', true, 'dtau0', 1, 'dtau_min', 1e-8, 'dtau_max', 1e12, 'dtau_grow', 3, ...
+    'stall_tol', 1e-8, 'stall_window', 50));
 
 eps2 = Para.epsilon^2;
 sz = size(u0);
@@ -118,6 +122,7 @@ if opts.verbose
 end
 
 eta_k = opts.eta_max;
+stalled = false;
 for it = 1:opts.maxit
     if res < opts.tol, break, end
 
@@ -232,9 +237,23 @@ for it = 1:opts.maxit
         if opts.verbose, fprintf('  dtau fell below dtau_min -- stopping\n'); end
         break
     end
+
+    % Roundoff floor: some states can't reach tol (one m = 0.7 state sits at
+    % ~2e-9 for thousands of steps). Stop once the residual is below
+    % stall_tol and hasn't halved over the last stall_window iterations.
+    w = opts.stall_window;
+    if it > w && res < opts.stall_tol && ...
+            min(info.res_hist(end-w+1:end)) > 0.5*min(info.res_hist(1:end-w))
+        stalled = true;
+        if opts.verbose
+            fprintf('  residual stalled at %.1e (roundoff floor) -- stopping\n', res);
+        end
+        break
+    end
 end
 
-info.converged = res < opts.tol;
+info.converged = res < opts.tol || stalled;
+info.stalled = stalled;
 mu = mu_fun(u);
 info.lambda = mean(mu(:));
 % E: the energy the solver uses (u is an exact critical point of it).
