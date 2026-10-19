@@ -8,7 +8,7 @@ Para.alpha = 0;
 Para.OK = 0;
 Para.beta = 1;
 Para.epsilon = 0.1;
-tau = 1e-4;
+tau = 1e-5;
 Para.err_tol = [tau, tau, 1e-5, 1e-6, 1e-9, 1e-4];
 % Para.err_tol_AM3 = 1e-5;
 % Para.err_tol = 1e-5;
@@ -75,9 +75,9 @@ Grid = SSAV_helpers.generate_Grid(L, N, dim, model);
 % if dt_min = dt_max BDF2 will be implemented, otherwise an adaptive time
 % stepping scheme will be used
 Time.dt_min = 1E-5;        % minimum time step
-Time.dt_max = 1E2;        % maximum time step
+Time.dt_max = 10;        % maximum time step
 Time.t0 = 0;    % starting time
-Time.tf = 2;    % final time
+Time.tf = 5;    % final time
 
 % Choice of adaptive time stepper
 %       - Third order Adams-Moulton: 'AM3'
@@ -88,8 +88,6 @@ save_u = 1;
 
 % Initial condition
 u = 0.05*sin(Grid.xx).*sin(Grid.yy);
-% u = 0.25 + 0.4*rand(Grid.Nx, Grid.Ny);
-% Para.m = mean(u(:));
 
-Results = SSAV(Grid, Time, Para, u, model, dim, 0, Time.tf);
+Results = SSAV(Grid, Time, Para, u, model, dim, 0, 1);
 % Results = SSAV_2D_AM (Grid, Time, Para, u, model);

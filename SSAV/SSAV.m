@@ -51,11 +51,11 @@ if model == 2
     D = (-Grid.k2 + 1);          % PFC
     
 else
-    
     D = -1i*sqrt(Grid.k2);   % AC, CH and OK -- built from Grid.k2 (Nyquist
                              % preserved), not Grid.k (Nyquist zeroed):
                              % D gets squared below and must reproduce G
                              % exactly at every mode, including Nyquist
+
 end
 
 % Define operator G

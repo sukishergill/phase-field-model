@@ -15,7 +15,7 @@ Para.err_tol = [1e-3, 1e-3, 1e-5, 1e-6, 1e-9, 1e-4];
 Para.err_tol_AM3 = 1e-6;
 Para.rho_s = 0.9;
 Para.sigma = 500;
-Para.m = 0.01;
+Para.m = 0.16;
 Para.M = 1;
 Para.B = 1e5;          % const. that ensures positive radicand
 Para.S = 2;          % positive stabilizing parameter S ~ ||f(u)||_\infty
@@ -25,9 +25,9 @@ Para.delta = 1e-8;
 
 % spatial discretization
 dim = 2;
-% L = [32*pi, 32*pi];
-L = [128, 128];
-N = [128, 128];
+L = [32*pi, 32*pi/sqrt(3)];
+% L = [128, 128];
+N = [256, 256];
 Grid = SSAV_helpers.generate_Grid(L, N, dim, model);
 
 % Grid.Lx = 32*pi;        Grid.Ly = 32*pi;         % domain size
@@ -54,12 +54,12 @@ Grid = SSAV_helpers.generate_Grid(L, N, dim, model);
 % time discretization
 % if dt_min = dt_max BDF2 will be implemented, otherwise an adaptive time
 % stepping scheme will be used
-Time.dt_max = 10;        % minimum time step
-Time.dt_min = 1e-3;        % maximum time step
+Time.dt_max = 0.01;        % minimum time step
+Time.dt_min = 0.01;        % maximum time step
 % Time.dt_max = 0.5;
 % Time.dt_min = 1e-3;
 Time.t0 = 0;
-Time.tf = 1000;
+Time.tf = 500;
 Time.adap = 5;
 
 % Initial condition

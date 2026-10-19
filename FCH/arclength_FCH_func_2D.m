@@ -345,6 +345,7 @@ for i = 1:Nc
 end
 end
 
+
 function [c, resid_hist] = gradient_descent_cos(c, eps, eta, Grid, maxit, tol)
 % Semi-implicit ("stabilized") gradient descent toward a genuine FCH
 % steady state at fixed mass, starting from c.
@@ -417,6 +418,14 @@ end
 
 end
 
+function Jv = reduced_Jv(u, v, eps, eta, Grid)
+
+vc = [0; v];
+Jvc = fch_jac_cos(u, vc, eps, eta, Grid);
+Jv = Jvc(2:end);
+
+end
+
 function [c, resid_hist] = newton_polish_cos(c, m, eps, eta, Grid, maxit, tol)
 % Plain, fixed-mass Newton polish: solve compute_mu_cos(c) = 0 on rows
 % 2:end (row 1 is structurally always zero -- the mean-mode redundancy
@@ -449,6 +458,10 @@ for it = 1:maxit
     ck = expand_cos(c, Grid.N, Grid.Nc);
     u = real(ifftn(ck * N));
     J = fch_jac_matrix_cos(u, c, eps, eta, Grid);
+    % Jfunc = @(v) reduced_Jv(u, v, eps, eta, Grid);
+
+    % dc = gmres(Jfunc, -mu(2:end), 50, 1e-6, 50);
+    % dc = [0; dc];
 
     dc = zeros(Nc, 1);
     dc(2:end) = J(2:end, 2:end) \ (-mu(2:end));
@@ -557,6 +570,7 @@ for step = 1:max_steps
                 (1/Nc)*(c_curr - c)'*t(1:end-1) + (m_curr - m)*t(end) - ds];
 
             dx = G \ (-b);
+            % dx = gmres(G, -b, 50, 1e-6, 50);
 
             c_new = c_curr + dx(1:end-1);
             ck_new = expand_cos(c_new, Grid.N, Grid.Nc);

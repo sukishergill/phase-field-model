@@ -32,14 +32,13 @@ Eu(1) = SSAV_FCH_helpers.compute_E(u_fft, w_old, Para, Grid);
 H = SSAV_FCH_helpers.compute_H(u, w_old, Para, F1, F2, Grid);
 H_old = H;
 
-r = w_old - 0.5 * sum(sum(H.*u))*prod(Grid.d);
+r = w_old - 0.5 * sum(H.*u, 'all')*prod(Grid.d);
 
 H2 = fftn(H);
 
-v = fftn(u);
 
 r_hat = u/dt + (Para.epsilon^2*(2 + Para.eta1 + 2*Para.tau^2/3) + Para.S) * ...
-    real(ifftn(Grid.k4 .* v)) + r * real(ifftn(-Grid.k2 .* H2));
+    ifftn(Grid.k4 .* u_fft, 'symmetric') + r * ifftn(-Grid.k2 .* H2, 'symmetric');
 
 % define linear operator P for BDF1
 P1 = Para.epsilon^4 * Grid.k6 + Para.S * Grid.k4;
@@ -98,12 +97,12 @@ for j = 2 : nmax
     H = fftn(H_snew);
     u_snew = fftn(u_snew);
 
-    r = (4*w - w_old)/3 - 0.5 * sum(sum(H_snew .* (4*u - u_old)/3)) ...
+    r = (4*w - w_old)/3 - 0.5 * sum(H_snew .* (4*u - u_old)/3, 'all') ...
         * prod(Grid.d);
 
     r_hat = (4*u - u_old)/(2*dt) + (Para.epsilon^2*(2 + Para.eta1 + ...
-        2*Para.tau^2/3) + Para.S) * real(ifftn(Grid.k4 .* u_snew)) + ...
-        r * real(ifftn(-Grid.k2 .* H));
+        2*Para.tau^2/3) + Para.S) * ifftn(Grid.k4 .* u_snew, 'symmetric') + ...
+        r * ifftn(-Grid.k2 .* H, 'symmetric');
 
     r_hat = fftn(r_hat);
 
@@ -138,7 +137,7 @@ for j = 2 : nmax
 
 end
 
-Eu = Eu / prod(Grid.L);
+% Eu = Eu / prod(Grid.L);
 
 Results.t_vals = t_vals;
 Results.Eu = Eu;

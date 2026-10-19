@@ -8,7 +8,7 @@
 % construction -- du/dx is odd, so translation simply isn't a direction
 % available within the even/cosine subspace -- instead of relying on
 % bordering to paper over it after the fact.
-
+ 
 eps = 0.1;      eta = eps^2;
 
 % initialize values
@@ -23,7 +23,7 @@ UO = u;
 
 % generate grid
 dim = 1;
-L = 2*pi;
+L = 4*pi;
 N = numel(u);       % must match whatever grid size Results was generated
                      % with -- derive it from the data instead of
                      % hardcoding it, so this can never silently drift out

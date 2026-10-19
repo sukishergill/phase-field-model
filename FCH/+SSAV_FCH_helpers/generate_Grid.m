@@ -12,6 +12,7 @@ k_even = cell(dim, 1);
 for i = 1:dim
     Grid.x{i} = Grid.L(i)*(1:Grid.N(i))' / Grid.N(i) - Grid.L(i)/2;
     k{i} = [ 0:Grid.N(i)/2-1, 0.0, -Grid.N(i)/2+1:-1]' / (Grid.L(i)/pi/2);
+    % k{i} = [ 0:Grid.N(i)/2-1, -Grid.N(i)/2:-1]' / (Grid.L(i)/pi/2);
     % even-order (Laplacian/biharmonic) operators have no sign ambiguity at
     % the Nyquist mode, so unlike k{i} above it should NOT be zeroed out
     k_even{i} = [ 0:Grid.N(i)/2-1, Grid.N(i)/2, -Grid.N(i)/2+1:-1]' / (Grid.L(i)/pi/2);

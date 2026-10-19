@@ -58,6 +58,7 @@ Eu_direct = zeros(1, ceil(nmax / E_direct_every) + 3);
 t_direct = zeros(1, numel(Eu_direct));
 Et_vals = zeros(1, nmax);
 t_vals = zeros(1, nmax);
+l_vals = zeros(1,nmax);
 dt_idx = zeros(1, nmax);
 dt_prop_true = zeros(1, nmax);
 
@@ -247,12 +248,13 @@ while t < Time.tf
         Eu_sym(j) = 0.5*(E_new + SSAV_FCH_helpers.compute_E(2*u_new_fft - u_fft,...
             2*w_new - w, Para, Grid));
         E_t = (Eu_sym(j) - Eu_sym(j-1)) / dt_new;
-        % Et_vals(j) = E_t;
 
         l = l + 1;
 
     end
     end
+
+    l_vals(j+1) = l;
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %%%%%%%%%%%%%%%%% Adaptive time stepping %%%%%%%%%%%%%%%%%
@@ -284,6 +286,7 @@ while t < Time.tf
             Para.epsilon, Para.eta1, Grid);
         t_direct(n_direct) = t;
     end
+
     Et_vals(j + 1) = E_t;
 
     w_old = w;                      w = w_new;
@@ -337,14 +340,16 @@ if Time.dt_max ~= Time.dt_min
     nt = sum(t_vals > 0) + 1;
     Eu = Eu(1:nt);
     Et_vals = Et_vals(1:nt);
-    Eu_sym = Eu_sym(1:nt);
+    Eu_sym = Eu_sym(1:nt-1);
     t_vals = t_vals(1:nt);
+    l_vals = l_vals(1:nt);
     dt_idx = dt_idx(1:nt-1);
     dt_prop_true = dt_prop_true(1:nt-1);
 
 end
 
 Results.t_vals = t_vals;
+Results.l_vals = l_vals;
 Results.Eu = Eu;
 Results.Eu_sym = Eu_sym;
 Results.Eu_direct = Eu_direct;

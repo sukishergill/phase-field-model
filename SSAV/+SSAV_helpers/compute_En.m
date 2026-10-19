@@ -28,17 +28,17 @@ if model == 2
     du = ifftn(D.*u_fft, 'symmetric');
 else
 
-    % if dim == 1
-    %     ux = ifftn(-1i*Grid.kxx.*u_fft, 'symmetric');  
-    %     du = ux.^2;
-    % 
-    % elseif dim == 2
+    if dim == 1
+        ux = ifftn(-1i*Grid.kxx.*u_fft, 'symmetric');  
+        du = ux.^2;
+
+    else
         ux = ifftn(-1i*Grid.kxx.*u_fft, 'symmetric');
         uy = ifftn(-1i*Grid.kyy.*u_fft, 'symmetric');
 
         du = ux.^2 + uy.^2;
 
-    % end
+    end
 
     if dim == 3
         uz = ifftn(-1i*Grid.kzz.*u_fft, 'symmetric');
