@@ -137,9 +137,11 @@ def compute_dtnew(E_t, err_tol, delta, dt, dt_min, dt_max):
     dt_2 = err_tol[1] / np.sqrt(E_t + delta**2)
 
     dt_prop = min(dt_1, dt_2)
+    min_dt = min(dt_max, max(Time.dt_min, dt_prop))
+    dt_new = min(2*dt, max(0.1*dt, min_dt))
 
-    min_dt = min(dt_max, 2*dt, dt_prop)
+    #min_dt = min(dt_max, 2*dt, dt_prop)
 
-    dt_new = max(dt_min, min_dt, 0.1*dt)
+    #dt_new = max(dt_min, min_dt, 0.1*dt)
 
     return dt_new
