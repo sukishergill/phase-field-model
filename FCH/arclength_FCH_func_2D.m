@@ -264,8 +264,8 @@ c = reshape(c, Nc(1), Nc(2));
 ck_derot = zeros(N(1), N(2));
 ck_derot(1:Nc(1), 1:Nc(2)) = c;
 
-ck_derot(Nc(2)+1:N(2), 1:Nc(1)) = c(Nc(2)-1:-1:2, :);
-ck_derot(:, Nc(1)+1:N(1)) = ck_derot(:, Nc(1)-1:-1:2);
+ck_derot(Nc(1)+1:N(1), 1:Nc(2)) = c(Nc(1)-1:-1:2, :);
+ck_derot(:, Nc(2)+1:N(2)) = ck_derot(:, Nc(2)-1:-1:2);
 
 kx = (0:N(1)-1);
 ky = (0:N(2)-1)';
@@ -295,17 +295,17 @@ ck_derot = ck_full .* phase;
 
 c = real(ck_derot(1:Nc(1), 1:Nc(2)));
 
-for i = 1:Nc(2)
-    for j = 1:Nc(1)
+for i = 1:Nc(1)
+    for j = 1:Nc(2)
 
-        ix = N(2) - i + 2;
-        iy = N(1) - j + 2;
+        ix = N(1) - i + 2;
+        iy = N(2) - j + 2;
 
-        if i > 1 && i < Nc(2)
+        if i > 1 && i < Nc(1)
             c(i,j) = real(0.5*(ck_derot(i,j) + ck_derot(ix,j)));
         end
 
-        if j > 1 && j < Nc(1)
+        if j > 1 && j < Nc(2)
             c(i,j) = real(0.5*(c(i,j) + ck_derot(i,iy)));
         end
 
@@ -335,7 +335,6 @@ Nc = prod(Grid.Nc);
 J = zeros(Nc, Nc);
 
 e = zeros(Nc, 1);
-h = 1e-6;
 
 for i = 1:Nc
     e(i) = 1;
@@ -459,7 +458,7 @@ for it = 1:maxit
     u = real(ifftn(ck * N));
     J = fch_jac_matrix_cos(u, c, eps, eta, Grid);
     % Jfunc = @(v) reduced_Jv(u, v, eps, eta, Grid);
-
+    % 
     % dc = gmres(Jfunc, -mu(2:end), 50, 1e-6, 50);
     % dc = [0; dc];
 
