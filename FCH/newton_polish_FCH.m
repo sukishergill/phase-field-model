@@ -94,9 +94,8 @@ if opts.even
     end
 end
 
-lap = @(v) real(ifftn(-Grid.k2 .* fftn(v)));
-mu_fun = @(u) compute_mu(u, Para, lap);
-Jv_fun = @(u, v) apply_J(u, v, Para, lap);
+mu_fun = @(u) SSAV_FCH_helpers.steady_mu(u, Para, Grid);
+Jv_fun = @(u, v) SSAV_FCH_helpers.steady_Jv(u, v, Para, Grid);
 
 % (-Lap)^{-1} on mean-zero functions: the H^{-1} metric of u_t = Lap mu
 Minv_sym = 1 ./ Grid.k2;
@@ -106,7 +105,7 @@ apply_Minv = @(v) real(ifftn(Minv_sym .* fftn(v)));
 u = u0;
 u_ref = u0;
 if opts.phase
-    [T, gram_eigs] = translation_directions(u_ref, Grid, opts.rank_tol);
+    [T, gram_eigs] = SSAV_FCH_helpers.translation_directions(u_ref, Grid, opts.rank_tol);
 else
     T = zeros(n, 0);
     gram_eigs = [];
@@ -115,7 +114,7 @@ p = size(T, 2);
 
 [R, g] = residual(u);
 res = rms([R(:); g]);
-E = energy(u, Para, lap);
+E = SSAV_FCH_helpers.steady_energy(u, Para, Grid);
 dtau = opts.dtau0;
 
 info.res_hist = res;
@@ -181,7 +180,7 @@ for it = 1:opts.maxit
         u_try = u + du;
         [R_try, g_try] = residual(u_try);
         res_try = rms([R_try(:); g_try]);
-        E_try = energy(u_try, Para, lap);
+        E_try = SSAV_FCH_helpers.steady_energy(u_try, Para, Grid);
         accept = E_try <= E + 1e-14 || res_try < 0.5*res;
         dtau_used = dtau;
         if accept
@@ -203,7 +202,7 @@ for it = 1:opts.maxit
         end
         accept = true;
         dtau_used = inf;
-        E_try = energy(u_try, Para, lap);
+        E_try = SSAV_FCH_helpers.steady_energy(u_try, Para, Grid);
     end
 
     if accept
@@ -217,7 +216,7 @@ for it = 1:opts.maxit
             u = SSAV_FCH_helpers.symmetrize_even(u);
             [R, g] = residual(u);
             res = rms([R(:); g]);
-            E = energy(u, Para, lap);
+            E = SSAV_FCH_helpers.steady_energy(u, Para, Grid);
         end
 
         % Re-anchor the phase conditions at the current state. PTC can
@@ -227,7 +226,7 @@ for it = 1:opts.maxit
         % singular and stalls Newton.
         if opts.phase
             u_ref = u;
-            [T, gram_eigs] = translation_directions(u_ref, Grid, opts.rank_tol);
+            [T, gram_eigs] = SSAV_FCH_helpers.translation_directions(u_ref, Grid, opts.rank_tol);
             p = size(T, 2);
             [R, g] = residual(u);
         end
@@ -281,10 +280,10 @@ info.lambda = mean(mu(:));
 % E: the energy the solver uses (u is an exact critical point of it).
 % E_direct: compute_E_direct, which zeroes the Nyquist mode of its
 % derivatives, so it differs at the ~1e-9 level.
-info.E = energy(u, Para, lap);
+info.E = SSAV_FCH_helpers.steady_energy(u, Para, Grid);
 info.E_direct = SSAV_FCH_helpers.compute_E_direct(u, fftn(u), Para.epsilon, Para.eta1, Grid);
 % energy relative to the uniform state u = m (same energy functional)
-info.E_uniform = energy(m*ones(sz), Para, lap);
+info.E_uniform = SSAV_FCH_helpers.steady_energy(m*ones(sz), Para, Grid);
 info.dE = info.E - info.E_uniform;
 info.T = reshape(T, [sz, p]);
 info.gram_eigs = gram_eigs;
@@ -312,15 +311,6 @@ end
 
 end
 
-function E = energy(u, Para, lap)
-% energy per unit volume, consistent with compute_mu (|grad u|^2 integrated
-% by parts to -u Lap u, exact for the spectral Laplacian)
-[W, W1] = SSAV_FCH_helpers.compute_F(u, Para.tau);
-eps2 = Para.epsilon^2;
-g = eps2*lap(u) - W1;
-E = mean(0.5*g.^2 + 0.5*Para.eta1*eps2*u.*lap(u) - Para.eta2*W, 'all');
-end
-
 function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
 end
@@ -328,46 +318,6 @@ end
 function v = proj0(v)
 % remove the mean (k = 0 mode)
 v = v - mean(v(:));
-end
-
-function mu = compute_mu(u, Para, lap)
-[~, W1, W2] = SSAV_FCH_helpers.compute_F(u, Para.tau);
-eps2 = Para.epsilon^2;
-g = eps2*lap(u) - W1;
-mu = eps2*lap(g) - W2.*g + Para.eta1*g + (Para.eta1 - Para.eta2)*W1;
-end
-
-function w = apply_J(u, v, Para, lap)
-% exact Jacobian of compute_mu at u applied to v (W''' = 6u for any tau)
-[~, W1, W2] = SSAV_FCH_helpers.compute_F(u, Para.tau);
-eps2 = Para.epsilon^2;
-g = eps2*lap(u) - W1;
-dg = eps2*lap(v) - W2.*v;
-w = eps2*lap(dg) - W2.*dg + Para.eta1*dg - 6*u.*v.*g + (Para.eta1 - Para.eta2)*W2.*v;
-end
-
-function [T, gram_eigs] = translation_directions(u, Grid, rank_tol)
-% Orthonormal basis for span{du/dx, du/dy}, dropping directions in which u
-% is (numerically) invariant: stripes have one, a constant state has none.
-% Using the eigenvectors of the Gram matrix also handles tilted stripes,
-% whose invariant direction is a combination of x and y.
-U = fftn(u);
-if size(u, 2) == 1
-    D = real(ifft(1i*Grid.kxx .* U));
-else
-    ux = real(ifft2(1i*Grid.kxx .* U));
-    uy = real(ifft2(1i*Grid.kyy .* U));
-    D = [ux(:), uy(:)];
-end
-n = size(D, 1);
-[V, L] = eig((D'*D) / n);
-[gram_eigs, order] = sort(diag(L), 'descend');
-V = V(:, order);
-% relative threshold, with an absolute floor so a constant state
-% (derivatives at roundoff level) gets no directions at all
-keep = gram_eigs > max(rank_tol*gram_eigs(1), 1e-12);
-T = D * V(:, keep);
-T = T ./ vecnorm(T);
 end
 
 function opts = set_defaults(opts, defaults)
