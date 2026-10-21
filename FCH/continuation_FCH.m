@@ -32,7 +32,14 @@ function branch = continuation_FCH(u0, Grid, Para, opts)
 %   opts  (all optional)
 %     direction      +1: start towards larger m, -1: smaller     (+1)
 %     ds             initial arclength step (RMS units)         (0.01)
-%     ds_min, ds_max step-size limits                           (1e-5, 0.05)
+%     ds_min, ds_max step-size limits                           (1e-5, 0.2)
+%     its_grow       grow ds x1.5 when the corrector needs <= this many
+%                    iterations                                 (5)
+%     its_shrink     shrink ds x0.7 when it needs >= this many  (9)
+%                    (the even-mode chord corrector typically needs 4-7,
+%                    so a threshold of 3 kept ds from ever growing back
+%                    after a failure halved it)
+%     stop_at_fold   stop at the first fold in m                (false)
 %     max_steps      max continuation steps                     (200)
 %     m_range        stop when m leaves [m_min, m_max]          ([-0.95 0.95])
 %     even           stay in the even subspace                  (false)
@@ -50,6 +57,11 @@ function branch = continuation_FCH(u0, Grid, Para, opts)
 %                    the branch has reached the uniform branch u = m,
 %                    which solves the equations for every m       (true)
 %     uniform_tol    amplitude threshold, RMS of u - m          (1e-4)
+%     uniform_cross_tol  a local minimum of the amplitude below this
+%                    means the branch passed through the uniform state
+%                    between steps (it turns back in m there with the
+%                    pattern sign-flipped; not a fold): treated as
+%                    reaching the uniform branch                (0.02)
 %     symmetry       extra symmetry projection v -> S(v), applied after
 %                    the even projection (e.g. averaging with a half-cell
 %                    shift to keep two spots identical); S must be linear,
@@ -64,15 +76,17 @@ function branch = continuation_FCH(u0, Grid, Para, opts)
 %   (RMS of u - m), n_neg, lam (stab_k smallest eigenvalues, one row per
 %   point), tm (dm/ds), fold (fold in m between this point and the
 %   previous), bif (n_neg changed without a fold: possible branch point),
+%   cross_uniform (passed through the uniform state u = m),
 %   ds, newton_its, res; u (cell of profiles if store_u); plus Grid, Para,
 %   opts, solver, stop_reason.
 
 if nargin < 4, opts = struct(); end
 opts = set_defaults(opts, struct('direction', 1, 'ds', 0.01, 'ds_min', 1e-5, ...
-    'ds_max', 0.05, 'max_steps', 200, 'm_range', [-0.95 0.95], 'even', false, ...
+    'ds_max', 0.2, 'its_grow', 5, 'its_shrink', 9, 'stop_at_fold', false, 'max_steps', 200, 'm_range', [-0.95 0.95], 'even', false, ...
     'linear_solver', 'auto', 'tol', 1e-9, 'newton_maxit', 15, 'gmres_maxit', 1000, ...
     'beta', 1, 'polish_first', true, 'stability', true, 'neg_tol', 1e-6, 'stab_k', 4, ...
-    'store_u', true, 'stop_on_uniform', true, 'uniform_tol', 1e-4, 'verbose', true, ...
+    'store_u', true, 'stop_on_uniform', true, 'uniform_tol', 1e-4, 'uniform_cross_tol', 0.02, ...
+    'verbose', true, ...
     'symmetry', [], 'fold_tm_tol', 0.01));
 solver = opts.linear_solver;
 if strcmp(solver, 'auto')
@@ -171,12 +185,13 @@ for step = 1:opts.max_steps
         print_point(k, note);
     end
 
-    % ---- step-size control: aim for ~3-5 corrector iterations ----
-    if its <= 3
+    % ---- step-size control ----
+    if its <= opts.its_grow
         ds = min(opts.ds_max, 1.5*ds);
-    elseif its >= 8
+    elseif its >= opts.its_shrink
         ds = max(opts.ds_min, 0.7*ds);
     end
+
 
     if m < opts.m_range(1) || m > opts.m_range(2)
         stop_reason = 'left m_range';
@@ -184,6 +199,20 @@ for step = 1:opts.max_steps
     end
     if opts.stop_on_uniform && branch.amp(k) < opts.uniform_tol
         stop_reason = sprintf('reached the uniform branch u = m at m = %.4f', m);
+        break
+    end
+    if k >= 3 && branch.amp(k-1) < opts.uniform_cross_tol && ...
+            branch.amp(k-1) < branch.amp(k-2) && branch.amp(k-1) < branch.amp(k)
+        % stepped across the uniform state: a turning point in m but not a fold
+        branch.fold(k-2:k) = false;
+        branch.cross_uniform(k-1) = true;
+        if opts.stop_on_uniform
+            stop_reason = sprintf('passed through the uniform branch u = m near m = %.4f', branch.m(k-1));
+            break
+        end
+    end
+    if opts.stop_at_fold && any(branch.fold)
+        stop_reason = sprintf('fold at m = %.4f', branch.m(find(branch.fold, 1)));
         break
     end
     % closed loop (isola): back within one step of the start after having
@@ -309,6 +338,7 @@ end
     function b = init_branch()
         b = struct('m', [], 'E', [], 'dE', [], 'lambda', [], 'amp', [], 'n_neg', [], ...
             'lam', zeros(0, opts.stab_k), 'tm', [], 'fold', false(0), 'bif', false(0), ...
+            'cross_uniform', false(0), ...
             'ds', [], 'newton_its', [], 'res', [], 'u', {{}}, 'u_start', u0);
     end
 
@@ -326,6 +356,7 @@ end
         branch.res(end+1) = res;
         branch.fold(end+1) = false;
         branch.bif(end+1) = false;
+        branch.cross_uniform(end+1) = false;
         lam = nan(1, opts.stab_k);
         n_neg = NaN;
         if opts.stability
