@@ -449,6 +449,8 @@ for it = 1:maxit
     mu = compute_mu_cos(c, eps, eta, Grid);
     resid_hist(it) = norm(mu(2:end));
 
+    fprintf('Newton polish %3d: residual = %.3e\n', it, norm(mu(2:end)));
+
     if resid_hist(it) < tol
         resid_hist = resid_hist(1:it);
         return
@@ -456,14 +458,46 @@ for it = 1:maxit
 
     ck = expand_cos(c, Grid.N, Grid.Nc);
     u = real(ifftn(ck * N));
-    J = fch_jac_matrix_cos(u, c, eps, eta, Grid);
-    % Jfunc = @(v) reduced_Jv(u, v, eps, eta, Grid);
+    % J = fch_jac_matrix_cos(u, c, eps, eta, Grid);
+    % A = J(2:end, 2:end);
     % 
-    % dc = gmres(Jfunc, -mu(2:end), 50, 1e-6, 50);
-    % dc = [0; dc];
+    % dc = zeros(Nc, 1);
+    % dc(2:end) = J(2:end, 2:end) \ (-mu(2:end));
+    % 
+    % relres = norm(A*dc(2:end) + mu(2:end)) / max(norm(mu(2:end)), 1e-14);
+    % 
+    % fprintf('direct relres = %.3e\n', relres);
+    % 
+    % fprintf('  rcond(A) = %.3e, direct relres = %.3e\n', ...
+    %     rcond(A), relres);
 
-    dc = zeros(Nc, 1);
-    dc(2:end) = J(2:end, 2:end) \ (-mu(2:end));
+    Jfun = @(v) reduced_Jv(u, v, eps, eta, Grid);
+
+    k2 = Grid.k2(1:Grid.Nc(1), 1:Grid.Nc(2));
+    k2 = k2(:);
+    k2 = k2(2:end); 
+
+    pdiag = eps^4*k2.^3 + eta*eps^2*k2.^2;
+
+    % Avoid division by zero or excessively small entries.
+    pmin = 1e-10 * max(1, max(abs(pdiag)));
+    pdiag = max(abs(pdiag), pmin);
+
+    Mfunc = @(v) v ./ pdiag;
+    
+    [dc, flag, relres, iter] = gmres(Jfun, -mu(2:end), 50, 1e-10, 100, Mfunc);
+
+    if flag ~= 0
+        warning('Matrix-free GMRES did not converge');
+    end
+
+    if flag ~= 0 || ~all(isfinite(dc))
+        error('Matrix-free GMRES failed. Inspect the preconditioner and conditioning.');
+    end
+
+
+    dc = [0; dc];
+
     c = c + dc;     % c(1) unchanged: dc(1) = 0, mass stays exactly m
 
 end
@@ -558,18 +592,61 @@ for step = 1:max_steps
 
             F_curr = compute_mu_cos(c_curr, eps, eta, Grid);
 
-            J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
+            % J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);  
+            Jfun = @(v) fch_jac_cos(u_curr, [0, v(1:Nc-1)], eps, eta, Grid);
 
             Fm = zeros(1, Nc+1);     Fm(1) = 1; Fm(end) = -1;
             Jm = zeros(Nc-1, 1);
 
-            G = [J(2:end,:), Jm; Fm; [(1/Nc)*t(1:end-1); t(end)]'];
+            % G = [J(2:end,:), Jm; Fm; [(1/Nc)*t(1:end-1); t(end)]'];
+            % Gfun = @(z) [
+            %     Jfun(z(1:Nc)), Jm;
+            %     z(1) - z(end);
+            %     (1/Nc) * t(1:end-1)'*z(1:Nc) + t(end)*z(end)];
+
+            
+            Gfun = @(z) build_G(u_curr, z, eps, eta, Grid, Nc, t);
 
             b = [F_curr(2:end); c_curr(1) - m_curr;...
                 (1/Nc)*(c_curr - c)'*t(1:end-1) + (m_curr - m)*t(end) - ds];
 
-            dx = G \ (-b);
-            % dx = gmres(G, -b, 50, 1e-6, 50);
+            % if any(~isfinite(G(:))) || any(~isfinite(b))
+            %     error('Non-finite values in the continuation corrector.');
+            % end
+    
+            % dx = G \ (-b);
+
+            % Fourier-diagonal preconditioner for the FCH Jacobian block.
+            k2 = Grid.k2(1:Grid.Nc(1), 1:Grid.Nc(2));
+            k2 = k2(:);
+            k2 = k2(2:end);     % exclude the zero-frequency mass mode
+            
+            % Magnitude of the principal sixth-order FCH symbol.
+            pdiag = eps^4*k2.^3 + abs(eta)*eps^2*k2.^2;
+            
+            % Protect against division by zero and very small entries.
+            pmin = 1e-10 * max(1, max(pdiag));
+            pdiag = max(pdiag, pmin);
+            
+            % Left preconditioner: scale the physics residuals, leaving both
+            % border equations unchanged.
+            Mfunc = @(v) [v(1:Nc-1)./pdiag;
+                          v(Nc);
+                          v(Nc+1)];
+
+
+            [dx, flag, relres, iter] = gmres(Gfun, -b, 50, 1e-6, 200, Mfunc);
+
+            if flag ~= 0
+                warning('Matrix-free GMRES did not converge');
+            end
+
+            if any(~isfinite(dx))
+                warning('Non-finite Newton correction at step %d.', step);
+            end
+
+            % relres = norm(G*dx + b) / max(norm(b), 1e-14);
+            % fprintf('direct relres = %.3e\n', relres);
 
             c_new = c_curr + dx(1:end-1);
             ck_new = expand_cos(c_new, Grid.N, Grid.Nc);
@@ -627,6 +704,7 @@ for step = 1:max_steps
                     '(its=%d, disp=%e vs ref=%e) -- likely branch switch\n'], ...
                     step, its, this_disp, jump_ref);
             end
+            
             % Newton failed to converge within the iteration cap, or the
             % step looked suspicious above -- reject the step (don't
             % advance), shrink ds, and retry from the same last-accepted
@@ -720,3 +798,17 @@ if strcmp(diag.stop_reason, 'max_steps_reached')
 end
 
 end
+
+function y = build_G(u, z, eps, eta, Grid, Nc, t)
+
+dc = z(1:Nc);
+dm = z(Nc+1);
+
+Jdc = fch_jac_cos(u, dc, eps, eta, Grid);
+
+y = [Jdc(2:end);
+    dc(1) - dm;
+    (1/Nc) * (t(1:Nc)' * dc) + t(end) * dm];
+
+end
+
