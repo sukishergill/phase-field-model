@@ -1,7 +1,10 @@
 % Plot dE = E - E_uniform(m) against m for every branch from
 % continue_m_sweep.m: one colour per starting state (both continuation
 % directions in the same colour), solid stable, dashed unstable, dots at
-% folds. Saves a .png next to the branches file.
+% folds. If reference_patterns.mat exists (reference_patterns_sweep.m),
+% the identical-stripe and hex-spot-lattice branches are overlaid as thin
+% lines (solid stable, dotted unstable within their own symmetry class).
+% Saves a .png next to the branches file.
 
 % newest branches file (set br_file by hand to use another)
 br_files = dir('ex5_m_sweep_*_branches.mat');
@@ -34,8 +37,45 @@ for i = 1:nm
     end
     plot(ax, m0(i), br_cells{i, 1}.dE(1), 'p', 'Color', 'k', 'MarkerFaceColor', c, 'MarkerSize', 12);
 end
-legend(ax, h, arrayfun(@(m) sprintf('start m = %.2f', m), m0, 'UniformOutput', false), ...
-    'Location', 'southwest');
+labels = arrayfun(@(m) sprintf('start m = %.2f', m), m0, 'UniformOutput', false);
+
+% reference patterns (reference_patterns_sweep.m), if computed: n identical
+% stripes (gray) and ideal hex spot lattices (magenta), thin lines
+xl = [min(cellfun(@(b) min(b.m), br_cells(:))) - 0.05, max(cellfun(@(b) max(b.m), br_cells(:))) + 0.05];
+if exist('reference_patterns.mat', 'file')
+    Rf = load('reference_patterns.mat', 'stripes', 'n_stripes', 'spots', 'spot_d');
+    fam = {Rf.stripes, Rf.spots};
+    fam_col = {[0.45 0.45 0.45], [0.75 0 0.75]};
+    fam_lab = {@(a) sprintf('%d', Rf.n_stripes(a)), @(a) sprintf('d=%.2f', Rf.spot_d(a))};
+    fam_name = {'n identical stripes (label n)', 'hex spot lattice (label d)'};
+    for F = 1:2
+        for a = 1:size(fam{F}, 1)
+            best = [inf, NaN];
+            for d = 1:size(fam{F}, 2)
+                b = fam{F}{a, d};
+                stable = b.n_neg == 0;
+                edges = [0, find(diff(stable) ~= 0), numel(stable)];
+                for r = 1:numel(edges) - 1
+                    idx = edges(r) + 1 : min(edges(r+1) + 1, numel(stable));
+                    if stable(edges(r) + 1), style = '-'; else, style = ':'; end
+                    hr = plot(ax, b.m(idx), b.dE(idx), style, 'Color', fam_col{F}, 'LineWidth', 0.9);
+                end
+                dEin = b.dE;
+                dEin(b.m < xl(1) | b.m > xl(2)) = inf;   % label within the plotted range
+                [emin, kmin] = min(dEin);
+                if emin < best(1), best = [emin, b.m(kmin)]; end
+            end
+            if isfinite(best(1))
+                text(ax, best(2), best(1), fam_lab{F}(a), 'Color', fam_col{F}, 'FontSize', 8, ...
+                    'VerticalAlignment', 'top', 'HorizontalAlignment', 'center');
+            end
+        end
+        h(end+1) = hr; %#ok<AGROW>
+        labels{end+1} = fam_name{F}; %#ok<AGROW>
+    end
+    xlim(ax, xl);
+end
+legend(ax, h, labels, 'Location', 'southwest');
 xlabel(ax, '$m$', 'Interpreter', 'latex');
 ylabel(ax, '$E - E_{\mathrm{uniform}}(m)$', 'Interpreter', 'latex');
 G = br_cells{1, 1}.Grid;

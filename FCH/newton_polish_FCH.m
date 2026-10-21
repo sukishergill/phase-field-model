@@ -59,6 +59,8 @@ function [u, info] = newton_polish_FCH(u0, Grid, Para, opts)
 %     stall_window  iterations without halving = stalled     (50)
 %     even          keep u even in x and y (symmetrize u0 and
 %                   every accepted iterate)                  (false)
+%     symmetry      extra symmetry projection u -> S(u) applied with
+%                   the even one (e.g. a half-cell shift average) ([])
 %
 % Outputs
 %   u     polished state
@@ -75,7 +77,7 @@ if nargin < 4, opts = struct(); end
 opts = set_defaults(opts, struct('tol', 1e-9, 'maxit', 100, 'gmres_maxit', 60, ...
     'eta_max', 0.1, 'beta', 1, 'phase', true, 'rank_tol', 1e-8, 'verbose', true, ...
     'ptc', true, 'dtau0', 1, 'dtau_min', 1e-8, 'dtau_max', 1e12, 'dtau_grow', 3, ...
-    'stall_tol', 1e-8, 'stall_window', 50, 'even', false));
+    'stall_tol', 1e-8, 'stall_window', 50, 'even', false, 'symmetry', []));
 
 eps2 = Para.epsilon^2;
 sz = size(u0);
@@ -92,6 +94,9 @@ if opts.even
     if opts.verbose && asym0 > 1e-6
         fprintf('even mode: removed relative asymmetry %.1e from u0\n', asym0);
     end
+end
+if ~isempty(opts.symmetry)
+    u0 = opts.symmetry(u0);
 end
 
 mu_fun = @(u) SSAV_FCH_helpers.steady_mu(u, Para, Grid);
@@ -212,8 +217,9 @@ for it = 1:opts.maxit
         eta_k = min(opts.eta_max, eta_new);
 
         u = u_try;  R = R_try;  g = g_try;  res = res_try;  E = E_try;
-        if opts.even
-            u = SSAV_FCH_helpers.symmetrize_even(u);
+        if opts.even || ~isempty(opts.symmetry)
+            if opts.even, u = SSAV_FCH_helpers.symmetrize_even(u); end
+            if ~isempty(opts.symmetry), u = opts.symmetry(u); end
             [R, g] = residual(u);
             res = rms([R(:); g]);
             E = SSAV_FCH_helpers.steady_energy(u, Para, Grid);

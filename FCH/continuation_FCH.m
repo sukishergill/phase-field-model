@@ -50,6 +50,13 @@ function branch = continuation_FCH(u0, Grid, Para, opts)
 %                    the branch has reached the uniform branch u = m,
 %                    which solves the equations for every m       (true)
 %     uniform_tol    amplitude threshold, RMS of u - m          (1e-4)
+%     symmetry       extra symmetry projection v -> S(v), applied after
+%                    the even projection (e.g. averaging with a half-cell
+%                    shift to keep two spots identical); S must be linear,
+%                    idempotent and commute with J                ([])
+%     fold_tm_tol    a fold is counted when dm/ds changes sign relative
+%                    to the last value with |dm/ds| > fold_tm_tol, so
+%                    jitter on near-vertical stretches is ignored (0.01)
 %     verbose        print one line per step                    (true)
 %
 % Output: branch struct with per-point arrays
@@ -65,7 +72,8 @@ opts = set_defaults(opts, struct('direction', 1, 'ds', 0.01, 'ds_min', 1e-5, ...
     'ds_max', 0.05, 'max_steps', 200, 'm_range', [-0.95 0.95], 'even', false, ...
     'linear_solver', 'auto', 'tol', 1e-9, 'newton_maxit', 15, 'gmres_maxit', 1000, ...
     'beta', 1, 'polish_first', true, 'stability', true, 'neg_tol', 1e-6, 'stab_k', 4, ...
-    'store_u', true, 'stop_on_uniform', true, 'uniform_tol', 1e-4, 'verbose', true));
+    'store_u', true, 'stop_on_uniform', true, 'uniform_tol', 1e-4, 'verbose', true, ...
+    'symmetry', [], 'fold_tm_tol', 0.01));
 solver = opts.linear_solver;
 if strcmp(solver, 'auto')
     if opts.even, solver = 'direct'; else, solver = 'gmres'; end
@@ -83,6 +91,9 @@ if opts.even
 else
     sym = @(v) v;
 end
+if ~isempty(opts.symmetry)
+    sym = @(v) opts.symmetry(sym(v));
+end
 mu_fun = @(u) SSAV_FCH_helpers.steady_mu(u, Para, Grid);
 Jv_fun = @(u, v) SSAV_FCH_helpers.steady_Jv(u, v, Para, Grid);
 
@@ -98,7 +109,7 @@ end
 % ---- starting point ----
 if opts.polish_first
     u0 = newton_polish_FCH(sym(u0), Grid, Para, struct('even', opts.even, ...
-        'verbose', false, 'maxit', 3000));
+        'symmetry', opts.symmetry, 'verbose', false, 'maxit', 3000));
 end
 u0 = sym(u0);
 m = mean(u0(:));
@@ -119,6 +130,8 @@ end
 ds = opts.ds;
 stop_reason = 'max_steps';
 left_start = false;
+tm_sign = sign(tm);             % last significant direction in m (fold hysteresis)
+k_sig = 1;                      % index of the last point with |tm| > fold_tm_tol
 for step = 1:opts.max_steps
     % ---- predictor / corrector, halving ds on failure ----
     while true
@@ -133,7 +146,6 @@ for step = 1:opts.max_steps
     end
 
     % ---- new point: linearize once, new tangent oriented by the old one ----
-    tm_old = tm;
     v = v_new;  m = m_new;
     T = phase_dirs(m + v);
     lin = linearize(m + v);
@@ -141,11 +153,20 @@ for step = 1:opts.max_steps
 
     record(m + v, m, tm, ds, its, res, lin);
     k = numel(branch.m);
-    branch.fold(k) = sign(tm) ~= sign(tm_old) && tm_old ~= 0;
+    if abs(tm) > opts.fold_tm_tol
+        if tm_sign ~= 0 && sign(tm) ~= tm_sign
+            % turned around since the last significant point: mark the
+            % fold where |dm/ds| is smallest in between
+            [~, j] = min(abs(branch.tm(k_sig:k)));
+            branch.fold(k_sig + j - 1) = true;
+        end
+        tm_sign = sign(tm);
+        k_sig = k;
+    end
     branch.bif(k) = ~branch.fold(k) && branch.n_neg(k) ~= branch.n_neg(k-1);
     if opts.verbose
         note = '';
-        if branch.fold(k), note = 'FOLD'; end
+        if any(branch.fold(k_sig:k)) && k_sig == k, note = 'FOLD (marked at the turning point)'; end
         if branch.bif(k), note = 'n_neg changed: possible branch point'; end
         print_point(k, note);
     end

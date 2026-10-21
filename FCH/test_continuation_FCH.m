@@ -34,9 +34,9 @@ for j = 1:numel(idx)
 end
 pass(max(dE) < 1e-12, sprintf('1D: re-polished branch points, max |E diff| %.1e', max(dE)));
 
-%% 3. stability exchange at folds
+%% 3. stability exchange at folds (compare the points either side)
 kf = find(b.fold);
-jumps = abs(b.n_neg(kf) - b.n_neg(kf - 1));
+jumps = abs(b.n_neg(min(kf + 1, end)) - b.n_neg(kf - 1));
 pass(~isempty(kf) && all(jumps == 1), sprintf('1D: %d fold(s), n_neg jumps %s', numel(kf), mat2str(jumps)));
 
 %% 4. direct vs GMRES: same branch (compare dE(m) before the first fold)
@@ -56,9 +56,9 @@ G2 = SSAV_FCH_helpers.generate_Grid([2*pi 2*pi], [64 64], 2);
 S = load('Ex5_test_polished.mat', 'u_polished');
 b2 = continuation_FCH(S.u_polished{4}, G2, P, struct('even', true, 'max_steps', 40, 'verbose', false));
 kf2 = find(b2.fold);
-pass(~isempty(kf2) && all(abs(b2.n_neg(kf2) - b2.n_neg(kf2 - 1)) == 1) && max(b2.res) < 1e-9, ...
+pass(~isempty(kf2) && all(abs(b2.n_neg(min(kf2 + 1, end)) - b2.n_neg(kf2 - 1)) == 1) && max(b2.res) < 1e-9, ...
     sprintf('2D 64^2: fold(s) at m = %s, n_neg %s -> %s, max |R| %.1e', mat2str(b2.m(kf2), 4), ...
-    mat2str(b2.n_neg(kf2 - 1)), mat2str(b2.n_neg(kf2)), max(b2.res)));
+    mat2str(b2.n_neg(kf2 - 1)), mat2str(b2.n_neg(min(kf2 + 1, end))), max(b2.res)));
 
 function out = ternary(c, a, b)
 if c, out = a; else, out = b; end
