@@ -662,10 +662,10 @@ for step = 1:max_steps
             
             dx = Mfun(dy);
             
-            fprintf('GMRES: flag=%d, relres=%.3e, iterations=%d\n', ...
-                flag, relres, iter(1)*50 + iter(2));
-            fprintf('Actual linear residual: %.3e\n', ...
-                norm(Gmat*dx + b)/max(norm(b), 1e-14));
+            % fprintf('GMRES: flag=%d, relres=%.3e, iterations=%d\n', ...
+            %     flag, relres, iter(1)*50 + iter(2));
+            % fprintf('Actual linear residual: %.3e\n', ...
+            %     norm(Gmat*dx + b)/max(norm(b), 1e-14));
 
             if flag ~= 0
                 % warning('Matrix-free GMRES did not converge');
