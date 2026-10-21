@@ -605,40 +605,73 @@ for step = 1:max_steps
             %     (1/Nc) * t(1:end-1)'*z(1:Nc) + t(end)*z(end)];
 
             
-            Gfun = @(z) build_G(u_curr, z, eps, eta, Grid, Nc, t);
-
+            % Gfun = @(z) build_G(u_curr, z, eps, eta, Grid, Nc, t);
+            % 
             b = [F_curr(2:end); c_curr(1) - m_curr;...
                 (1/Nc)*(c_curr - c)'*t(1:end-1) + (m_curr - m)*t(end) - ds];
+            % 
+            % % if any(~isfinite(G(:))) || any(~isfinite(b))
+            % %     error('Non-finite values in the continuation corrector.');
+            % % end
+            % 
+            % % dx = G \ (-b);
+            % 
+            % % Fourier-diagonal preconditioner for the FCH Jacobian block.
+            % k2 = Grid.k2(1:Grid.Nc(1), 1:Grid.Nc(2));
+            % k2 = k2(:);
+            % k2 = k2(2:end);     % exclude the zero-frequency mass mode
+            % 
+            % % Magnitude of the principal sixth-order FCH symbol.
+            % lambda = -eps^4*k2.^3 + eta*eps^2*k2.^2;
+            % 
+            % % Protect against division by zero and very small entries.
+            % pmin = 1e-8 * max(max(abs(lambda)), 1e-14);
+            % pdiag = max(abs(lambda), pmin);
+            % 
+            % % Left preconditioner: scale the physics residuals, leaving both
+            % % border equations unchanged.
+            % % Mfunc = @(v) [v(1:Nc-1)./pdiag;
+            % %               v(Nc);
+            % %               v(Nc+1)];
+            % 
+            % Mfunc = @(v) [v(1);
+            %     v(2:Nc)./pdiag;
+            %     v(Nc+1)];
+            % 
+            % [dx, flag, relres, iter] = gmres(Gfun, -b, 50, 1e-6, 100, [], Mfunc);
 
-            % if any(~isfinite(G(:))) || any(~isfinite(b))
-            %     error('Non-finite values in the continuation corrector.');
-            % end
-    
-            % dx = G \ (-b);
+            J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
 
-            % Fourier-diagonal preconditioner for the FCH Jacobian block.
-            k2 = Grid.k2(1:Grid.Nc(1), 1:Grid.Nc(2));
-            k2 = k2(:);
-            k2 = k2(2:end);     % exclude the zero-frequency mass mode
+            e1 = zeros(1, Nc);
+            e1(1) = 1;
             
-            % Magnitude of the principal sixth-order FCH symbol.
-            pdiag = eps^4*k2.^3 + abs(eta)*eps^2*k2.^2;
+            Gmat = [J(2:end,:), zeros(Nc-1, 1);
+                    e1,          -1;
+                    (1/Nc)*t(1:Nc)', t(end)];
             
-            % Protect against division by zero and very small entries.
-            pmin = 1e-10 * max(1, max(pdiag));
-            pdiag = max(pdiag, pmin);
+            % Factorize once per Newton iteration.
+            [Lfac, Ufac, p] = lu(Gmat, 'vector');
             
-            % Left preconditioner: scale the physics residuals, leaving both
-            % border equations unchanged.
-            Mfunc = @(v) [v(1:Nc-1)./pdiag;
-                          v(Nc);
-                          v(Nc+1)];
-
-
-            [dx, flag, relres, iter] = gmres(Gfun, -b, 50, 1e-6, 200, Mfunc);
+            % MATLAB's LU convention:
+            % P*R\Gmat*Q = L*U
+            % Use Gmat^{-1} as the right-preconditioning action.
+            Mfun = @(v) Ufac \ (Lfac \ v(p));
+            
+            [dy, flag, relres, iter] = gmres( ...
+                @(y) Gmat * Mfun(y), -b, 50, 1e-10, 100);
+            
+            dx = Mfun(dy);
+            
+            fprintf('GMRES: flag=%d, relres=%.3e, iterations=%d\n', ...
+                flag, relres, iter(1)*50 + iter(2));
+            fprintf('Actual linear residual: %.3e\n', ...
+                norm(Gmat*dx + b)/max(norm(b), 1e-14));
 
             if flag ~= 0
-                warning('Matrix-free GMRES did not converge');
+                % warning('Matrix-free GMRES did not converge');
+                fprintf(['  GMRES failure: flag=%d, relres=%.3e, ' ...
+                    'iterations=%d, ||b||=%.3e\n'], ...
+                    flag, relres, iter(2), norm(b));
             end
 
             if any(~isfinite(dx))
