@@ -21,11 +21,17 @@ copts = struct('even', PL.even_only, 'max_steps', 150, 'verbose', false, ...
 
 dirs = [1 -1];
 branches = cell(nm, numel(dirs));
+% progress in the command window as each branch finishes
+q = parallel.pool.DataQueue;
+t_start = tic;
+afterEach(q, @(msg) fprintf('[%6.1f min] %s\n', toc(t_start)/60, msg));
 parfor job = 1:nm*numel(dirs)
     [i, d] = ind2sub([nm, numel(dirs)], job);
     o = copts;
     o.direction = dirs(d);
     branches{job} = continuation_FCH(PL.u_polished{i}, SW.Grids{i}, Para, o);
+    send(q, sprintf('done: start m = %.2f, dir %+d, %d points (%s)', PL.m_vals(i), dirs(d), ...
+        numel(branches{job}.m), branches{job}.stop_reason));
 end
 branches = reshape(branches, nm, numel(dirs));
 
