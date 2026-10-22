@@ -1,68 +1,77 @@
-% Grid-resolution check of an energy comparison at fixed mass: the sweep
-% ("other") state at m_target against the best n-stripe state, each
-% Fourier-interpolated to finer grids and re-polished at the same m.
-% If dE of each converges and the gap keeps its sign and size, the
-% comparison is resolved.
+% Grid-resolution check of the energy comparison at a fixed mass m_target:
+% the lowest "other" (m-sweep branch) state against the lowest n-stripe and
+% hex-lattice states at the same m. Each is taken from the nearest stable
+% point on its branch, shifted to exactly m_target, polished there, then
+% Fourier-interpolated to finer grids and re-polished. If each dE converges
+% and the gaps keep their sign and size, the comparison is resolved.
 %
-% Settings (override before running): m_target (0.35), i_sweep (index of
-% the sweep state, 4 = m 0.35), n_stripe (6), net_factors ([1 2]: 128^2 and
-% 256^2), stripe_factors ([1 2 4 8]).
+% Settings (override before running):
+%   m_target        (0.35)
+%   other_factors   refinement factors for the sweep state ([1 2]: 128^2, 256^2)
+%   stripe_factors  for the one-period stripe cell   ([1 2 4 8])
+%   hex_factors     for the two-spot hex cell        ([1 2 4])
 
 if ~exist('m_target', 'var'), m_target = 0.35; end
-if ~exist('i_sweep', 'var'), i_sweep = 4; end
-if ~exist('n_stripe', 'var'), n_stripe = 6; end
-if ~exist('net_factors', 'var'), net_factors = [1 2]; end
+if ~exist('other_factors', 'var'), other_factors = [1 2]; end
 if ~exist('stripe_factors', 'var'), stripe_factors = [1 2 4 8]; end
+if ~exist('hex_factors', 'var'), hex_factors = [1 2 4]; end
 
-pol_files = dir('ex5_m_sweep_*_polished.mat');
-[~, newest] = max([pol_files.datenum]);
-in_file = pol_files(newest).name;
-PL = load(in_file, 'u_polished', 'm_vals', 'Para');
-SW = load(strrep(in_file, '_polished', ''), 'Grids');
-Para = PL.Para;
-popts = struct('even', true, 'verbose', false, 'maxit', 3000);
-
-%% sweep ("other") state
-u0 = PL.u_polished{i_sweep};
-G0 = SW.Grids{i_sweep};
-assert(abs(mean(u0(:)) - m_target) < 1e-12, 'sweep state %d has m = %.4f, not %.4f', i_sweep, mean(u0(:)), m_target);
-net = struct('N', {}, 'dE', {}, 'res', {}, 'time', {});
-for f = net_factors
-    N = f * G0.N(1);
-    G = SSAV_FCH_helpers.generate_Grid(G0.L, [N N], 2);
-    u = SSAV_FCH_helpers.fourier_resample(u0, [N N]);
-    t0 = tic;
-    [u, inf_n] = newton_polish_FCH(u, G, Para, popts);
-    net(end+1) = struct('N', N, 'dE', inf_n.dE, 'res', inf_n.res_hist(end), 'time', toc(t0)); %#ok<SAGROW>
-    fprintf('other  (start m %.2f) %4d^2: dE = %+.10f  |R| %.1e  converged %d  (%.0f s)\n', ...
-        PL.m_vals(i_sweep), N, inf_n.dE, inf_n.res_hist(end), inf_n.converged, net(end).time);
-end
-
-%% n identical stripes at the same m: nearest point on the lowest n-stripe branch
+br_files = dir('ex5_m_sweep_*_branches.mat');
+[~, newest] = max([br_files.datenum]);
+B = load(br_files(newest).name, 'branches');
 Rf = load_reference_patterns();
-rows = find(Rf.n_stripes == n_stripe);
-cand = Rf.stripes(rows, :);
-[~, w] = lowest_dE_at_m(cand, m_target, true);
-b = cand{w};
-[~, k] = min(abs(b.m - m_target) + 1e3*(b.n_neg ~= 0));
-us0 = b.u{k} + (m_target - b.m(k));          % shift to exactly m_target
-Gs0 = b.Grid;
-stripes_res = struct('N', {}, 'dE', {}, 'res', {});
-for f = stripe_factors
-    N = f * Gs0.N;
-    G = SSAV_FCH_helpers.generate_Grid(Gs0.L, N, 1);
-    u = SSAV_FCH_helpers.fourier_resample(us0, N);
-    [u, inf_s] = newton_polish_FCH(u, G, Para, popts);
-    stripes_res(end+1) = struct('N', N, 'dE', inf_s.dE, 'res', inf_s.res_hist(end)); %#ok<SAGROW>
-    fprintf('stripes n = %d, cell %4d points (dx %.4f): dE = %+.10f  |R| %.1e  converged %d\n', ...
-        n_stripe, N, Gs0.L/N, inf_s.dE, inf_s.res_hist(end), inf_s.converged);
+Para = B.branches{1}.Para;
+
+fams = {'other', 'stripes', 'hex'};
+sets = {B.branches, Rf.stripes, Rf.spots};
+factors = {other_factors, stripe_factors, hex_factors};
+labels = {@(w) sprintf('start m %.2f', B.branches{mod(w-1, size(B.branches, 1)) + 1, 1}.m(1)), ...
+          @(w) sprintf('n = %d', Rf.n_stripes(mod(w-1, size(Rf.stripes, 1)) + 1)), ...
+          @(w) sprintf('d = %.2f', Rf.spot_d(mod(w-1, size(Rf.spots, 1)) + 1))};
+fprintf('resolution check at m = %.4f (%s)\n', m_target, br_files(newest).name);
+
+dE = cell(1, 3);
+for F = 1:3
+    [e0, w] = lowest_dE_at_m(sets{F}, m_target, true);
+    if ~isfinite(e0)
+        fprintf('%-8s no stable state at this m\n', fams{F});
+        continue
+    end
+    b = sets{F}{w};
+    % nearest stable point on that branch, shifted to exactly m_target
+    [~, k] = min(abs(b.m - m_target) + 1e3*(b.n_neg ~= 0 | isnan(b.dE)));
+    u0 = b.u{k} + (m_target - b.m(k));
+    G0 = b.Grid;
+    popts = struct('even', true, 'verbose', false, 'maxit', 3000);
+    if isfield(b.opts, 'symmetry') && ~isempty(b.opts.symmetry)
+        % The stored symmetry has the coarse grid's shift baked in (the hex
+        % cell's half-cell shift). Use the size-generic half-shift instead,
+        % after checking it is the same operation on the coarse grid.
+        half_shift = @(v) (v + circshift(v, size(v)/2)) / 2;
+        r = randn(size(u0));
+        assert(max(abs(half_shift(r) - b.opts.symmetry(r)), [], 'all') < 1e-14, ...
+            'stored symmetry is not the half-cell shift; cannot refine it');
+        popts.symmetry = half_shift;
+    end
+    fprintf('%-8s %s, branch point m = %.4f (dE %+.6f) shifted by %+.1e\n', fams{F}, ...
+        labels{F}(w), b.m(k), b.dE(k), m_target - b.m(k));
+    dE{F} = nan(size(factors{F}));
+    for j = 1:numel(factors{F})
+        N = factors{F}(j) * G0.N;
+        dim = 1 + (size(u0, 2) > 1);             % column vector: 1D, else 2D
+        G = SSAV_FCH_helpers.generate_Grid(G0.L, N, dim);
+        u = SSAV_FCH_helpers.fourier_resample(u0, N);
+        t0 = tic;
+        [~, inf_p] = newton_polish_FCH(u, G, Para, popts);
+        dE{F}(j) = inf_p.dE;
+        fprintf('           x%d  %s: dE = %+.10f  |R| %.1e  converged %d  (%.0f s)\n', ...
+            factors{F}(j), mat2str(N), inf_p.dE, inf_p.res_hist(end), inf_p.converged, toc(t0));
+    end
 end
 
-%% gap at matching resolution (same dx factor)
-fprintf('\ngap other - stripes at m = %.3f (negative: the other state is lower)\n', m_target);
-for j = 1:numel(net_factors)
-    js = find(stripe_factors == net_factors(j), 1);
-    if isempty(js), continue, end
-    fprintf('  resolution x%d: %+.3e\n', net_factors(j), net(j).dE - stripes_res(js).dE);
+fprintf('gaps at m = %.4f (negative: the other state is lower)\n', m_target);
+for F = 2:3
+    if isempty(dE{1}) || isempty(dE{F}), continue, end
+    fprintf('  other - %-7s  coarsest %+.3e   finest %+.3e   change %.1e\n', fams{F}, ...
+        dE{1}(1) - dE{F}(1), dE{1}(end) - dE{F}(end), abs((dE{1}(end) - dE{F}(end)) - (dE{1}(1) - dE{F}(1))));
 end
-fprintf('  finest each:    %+.3e\n', net(end).dE - stripes_res(end).dE);

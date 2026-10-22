@@ -85,7 +85,7 @@ for a = 1:ncell
     ddy = G.yy - Ly/2;  ddy = ddy - Ly*round(ddy/Ly);
     r2 = hypot(ddx, ddy);
     cells{a} = struct('G', G, 'u', 1 - 2*layer(r1 - R) - 2*layer(r2 - R), ...
-        'half_shift', @(v) (v + circshift(v, [Ny/2, Nx/2])) / 2, ...   % spot at origin <-> corners
+        'half_shift', @(v) (v + circshift(v, size(v)/2)) / 2, ...   % spot at origin <-> corners (any resolution)
         'Nx', Nx, 'Ny', Ny, 'aspect', Ly/d);
 end
 spots = cell(ncell, 2);
