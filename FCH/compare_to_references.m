@@ -23,9 +23,9 @@ for i = 1:size(B.branches, 1)
     [es, ks] = best_ref(Rf.stripes, mq, stable_only);
     [eh, kh] = best_ref(Rf.spots, mq, stable_only);
     lab_s = '-';  if ~isnan(ks), lab_s = sprintf('%d', Rf.n_stripes(ks)); end
-    lab_h = '-';  if ~isnan(kh), lab_h = sprintf('%.2f', Rf.spot_d(kh)); end
+    lab_h = '-';  if ~isnan(kh), lab_h = Rf.spot_label{mod(kh-1, numel(Rf.spot_label)) + 1}; end
     if e0 < min(es, eh), verdict = 'sweep state lower'; else, verdict = 'reference lower'; end
-    fprintf('  %.2f   %+.6f   %+.6f (n=%s)       %+.6f (d=%s)        %+.6f  %s\n', ...
+    fprintf('  %.2f   %+.6f   %+.6f (n=%s)       %+.6f (%s)        %+.6f  %s\n', ...
         mq, e0, es, lab_s, eh, lab_h, e0 - min(es, eh), verdict);
 end
 

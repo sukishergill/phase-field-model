@@ -20,19 +20,22 @@ if nargin < 1
     files = {f.name};
 end
 Rf = struct('stripes', {cell(0, 2)}, 'n_stripes', [], 'spots', {cell(0, 2)}, ...
-    'spot_d', [], 'files', {files}, 'n_dropped', 0);
+    'spot_d', [], 'spot_label', {{}}, 'files', {files}, 'n_dropped', 0);
 for k = 1:numel(files)
-    S = load(files{k}, 'stripes', 'n_stripes', 'spots', 'spot_d');
+    S = load(files{k});
+    if ~isfield(S, 'spot_label')            % older files: dark spots only
+        S.spot_label = arrayfun(@(d) sprintf('d=%.2f', d), S.spot_d, 'UniformOutput', false);
+    end
     Rf.stripes = [Rf.stripes; S.stripes];
     Rf.n_stripes = [Rf.n_stripes, S.n_stripes];
     for j = 1:numel(S.spots)
         b = S.spots{j};
-        for k = 1:numel(b.m)
-            u = b.u{k};
+        for kp = 1:numel(b.m)
+            u = b.u{kp};
             vx = mean(std(u, 0, 2));    % variation along x
             vy = mean(std(u, 0, 1));    % variation along y
             if min(vx, vy) < 0.05*max(vx, vy)
-                b.dE(k) = NaN;          % a stripe, not a spot lattice
+                b.dE(kp) = NaN;         % a stripe, not a spot lattice
                 Rf.n_dropped = Rf.n_dropped + 1;
             end
         end
@@ -40,5 +43,6 @@ for k = 1:numel(files)
     end
     Rf.spots = [Rf.spots; S.spots];
     Rf.spot_d = [Rf.spot_d, S.spot_d];
+    Rf.spot_label = [Rf.spot_label, S.spot_label];
 end
 end

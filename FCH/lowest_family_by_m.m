@@ -89,7 +89,7 @@ if isnan(w), s = '-'; return, end
 switch F
     case 1
         i = mod(w - 1, size(Rf.spots, 1)) + 1;     % row = member
-        s = sprintf('d=%.2f', Rf.spot_d(i));
+        s = Rf.spot_label{i};
     case 2
         i = mod(w - 1, size(Rf.stripes, 1)) + 1;     % row = member
         s = sprintf('n=%d', Rf.n_stripes(i));

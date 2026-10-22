@@ -46,7 +46,7 @@ if ~isempty(dir('reference_patterns*.mat'))
     Rf = load_reference_patterns();     % all reference_patterns*.mat, merged
     fam = {Rf.stripes, Rf.spots};
     fam_col = {[0.45 0.45 0.45], [0.75 0 0.75]};
-    fam_lab = {@(a) sprintf('%d', Rf.n_stripes(a)), @(a) sprintf('d=%.2f', Rf.spot_d(a))};
+    fam_lab = {@(a) sprintf('%d', Rf.n_stripes(a)), @(a) Rf.spot_label{a}};
     fam_name = {'n identical stripes (label n)', 'hex spot lattice (label d)'};
     labelled = {{}, {}};
     for F = 1:2

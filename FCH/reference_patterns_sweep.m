@@ -18,7 +18,10 @@
 %             perturbations, including ones that make the spots unequal.
 %
 % Settings (set any of these before running the script to override):
-%   ref_parts      {'stripes', 'spots'}: which families to compute
+%   ref_parts      {'stripes', 'spots'}: which families to compute; add
+%                  'spots_light' for hex lattices of light spots (u ~ +1
+%                  in u ~ -1) on exact hex cells, spacings ref_light_d,
+%                  started at ref_light_m(d) (saved as spots, with labels)
 %   ref_ds_max     continuation ds_max ([] = continuation_FCH default)
 %   ref_max_steps  continuation max_steps per branch (3000)
 %   ref_out        output file ('reference_patterns.mat'); any
@@ -38,6 +41,8 @@ if ~exist('ref_parts', 'var'), ref_parts = {'stripes', 'spots'}; end
 if ~exist('ref_ds_max', 'var'), ref_ds_max = []; end
 if ~exist('ref_max_steps', 'var'), ref_max_steps = 3000; end
 if ~exist('ref_out', 'var'), ref_out = 'reference_patterns.mat'; end
+if ~exist('ref_light_d', 'var'), ref_light_d = [1.3 1.45 1.6 1.8 2.0 2.3 2.6 3.0 3.35]; end
+if ~exist('ref_light_m', 'var'), ref_light_m = @(d) 0.118 + (d > 1.85)*(0.35 - 0.118); end
 
 copts = struct('even', true, 'max_steps', ref_max_steps, 'verbose', false, 'm_range', [-0.95 0.95]);
 if ~isempty(ref_ds_max), copts.ds_max = ref_ds_max; end
@@ -102,5 +107,44 @@ for a = 1:ncell
         sum(spots{a,1}.fold) + sum(spots{a,2}.fold), spots{a,1}.stop_reason, spots{a,2}.stop_reason);
 end
 
-save(ref_out, 'stripes', 'n_stripes', 'spots', 'spot_d', 'Nx_cells', 'Para', 'copts', '-v7.3');
+spot_label = arrayfun(@(d) sprintf('d=%.2f', d), spot_d, 'UniformOutput', false);
+
+%% hexagonal lattices of light spots (exact hex cells, any d)
+if ismember('spots_light', ref_parts)
+    h = 0.08;                                     % target grid spacing
+    nl = numel(ref_light_d);
+    lcells = cell(nl, 1);
+    for a = 1:nl
+        d = ref_light_d(a);
+        Ly = d*sqrt(3);
+        G = SSAV_FCH_helpers.generate_Grid([d, Ly], [2*ceil(d/(2*h)), 2*ceil(Ly/(2*h))], 2);
+        r1 = hypot(G.xx, G.yy);
+        ddx = G.xx - d/2;   ddx = ddx - d*round(ddx/d);
+        ddy = G.yy - Ly/2;  ddy = ddy - Ly*round(ddy/Ly);
+        r2 = hypot(ddx, ddy);
+        m0 = ref_light_m(d);
+        R = sqrt((1 + m0)/2 * d * Ly / (2*pi));   % light-phase area fraction (1+m)/2
+        u = -1 + 2*(layer(r1 - R) + layer(r2 - R));
+        lcells{a} = struct('G', G, 'u', u - mean(u(:)) + m0, ...
+            'half_shift', @(v) (v + circshift(v, size(v)/2)) / 2);
+    end
+    light = cell(nl, 2);
+    parfor job = 1:2*nl
+        [a, dd] = ind2sub([nl, 2], job);
+        o = copts;  o.direction = dirs(dd);  o.symmetry = lcells{a}.half_shift;
+        light{job} = continuation_FCH(lcells{a}.u, lcells{a}.G, Para, o);
+    end
+    light = reshape(light, nl, 2);
+    for a = 1:nl
+        fprintf('hex light spots d = %.2f (start m %.3f): m in [%.3f, %.3f], %d + %d points, folds %d (%s | %s)\n', ...
+            ref_light_d(a), ref_light_m(ref_light_d(a)), min([light{a,1}.m light{a,2}.m]), ...
+            max([light{a,1}.m light{a,2}.m]), numel(light{a,1}.m), numel(light{a,2}.m), ...
+            sum(light{a,1}.fold) + sum(light{a,2}.fold), light{a,1}.stop_reason, light{a,2}.stop_reason);
+    end
+    spots = [spots; light];
+    spot_d = [spot_d, ref_light_d];
+    spot_label = [spot_label, arrayfun(@(d) sprintf('d=%.2f light', d), ref_light_d, 'UniformOutput', false)];
+end
+
+save(ref_out, 'stripes', 'n_stripes', 'spots', 'spot_d', 'spot_label', 'Nx_cells', 'Para', 'copts', '-v7.3');
 fprintf('Saved %s\n', ref_out);
