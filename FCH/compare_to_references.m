@@ -9,12 +9,10 @@
 % lower' claim).
 
 if ~exist('stable_only', 'var'), stable_only = true; end
-br_files = dir('ex5_m_sweep_*_branches.mat');
-[~, newest] = max([br_files.datenum]);
-B = load(br_files(newest).name, 'branches');
+[B.branches, br_names] = load_sweep_branches();   % all continue_m_sweep outputs, merged
 Rf = load_reference_patterns();     % all reference_patterns*.mat, merged
 
-fprintf('%s vs reference_patterns.mat (stable_only = %d)\n', br_files(newest).name, stable_only);
+fprintf('%s vs reference patterns (stable_only = %d)\n', strjoin(br_names, ' + '), stable_only);
 fprintf(' start m   sweep dE     best stripes dE (n)   best hex spots dE (d)   sweep - best ref\n');
 for i = 1:size(B.branches, 1)
     b0 = B.branches{i, 1};

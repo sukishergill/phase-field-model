@@ -1,7 +1,7 @@
 % Which pattern family has the lowest dE = E - E_uniform(m) at each mass:
 %   hex spots  ideal hex spot lattices   (reference_patterns.mat)
 %   stripes    n identical stripes        (reference_patterns.mat)
-%   other      the m-sweep branches       (newest ex5_m_sweep_*_branches.mat)
+%   other      the m-sweep branches       (all *_tofold_branches.mat, merged)
 % Prints the m-intervals each family wins, with the margin to the runner-up,
 % and plots the three lower envelopes. "other" only exists where the sweep
 % branches reach, so outside those m it cannot win by construction; a sweep
@@ -12,9 +12,7 @@ tie_tol = 5e-6;         % "other" within this of a reference is that reference p
 dm = 0.001;
 mq = 0:dm:0.95;         % tau = 0: E is symmetric under u -> -u, m -> -m
 
-br_files = dir('ex5_m_sweep_*_branches.mat');
-[~, newest] = max([br_files.datenum]);
-B = load(br_files(newest).name, 'branches');
+B.branches = load_sweep_branches();     % all continue_m_sweep outputs, merged
 Rf = load_reference_patterns();     % all reference_patterns*.mat, merged
 
 names = {'hex spots', 'stripes', 'other'};

@@ -6,12 +6,9 @@
 % lines (solid stable, dotted unstable within their own symmetry class).
 % Saves a .png next to the branches file.
 
-% newest branches file (set br_file by hand to use another)
-br_files = dir('ex5_m_sweep_*_branches.mat');
-[~, newest] = max([br_files.datenum]);
-br_file = br_files(newest).name;
-B = load(br_file, 'branches');
-br_cells = B.branches;                     % nm x 2 (directions +1, -1)
+% all continue_m_sweep outputs (to first fold), merged
+[br_cells, br_files] = load_sweep_branches();   % nm x 2 (directions +1, -1)
+br_file = 'all_sweeps_tofold_branches.mat';     % only used to name the .png
 [nm, nd] = size(br_cells);
 m0 = cellfun(@(b) b.m(1), br_cells(:, 1));
 

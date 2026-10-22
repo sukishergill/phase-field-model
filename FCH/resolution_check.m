@@ -16,9 +16,7 @@ if ~exist('other_factors', 'var'), other_factors = [1 2]; end
 if ~exist('stripe_factors', 'var'), stripe_factors = [1 2 4 8]; end
 if ~exist('hex_factors', 'var'), hex_factors = [1 2 4]; end
 
-br_files = dir('ex5_m_sweep_*_branches.mat');
-[~, newest] = max([br_files.datenum]);
-B = load(br_files(newest).name, 'branches');
+[B.branches, br_names] = load_sweep_branches();   % all continue_m_sweep outputs, merged
 Rf = load_reference_patterns();
 Para = B.branches{1}.Para;
 
@@ -28,7 +26,7 @@ factors = {other_factors, stripe_factors, hex_factors};
 labels = {@(w) sprintf('start m %.2f', B.branches{mod(w-1, size(B.branches, 1)) + 1, 1}.m(1)), ...
           @(w) sprintf('n = %d', Rf.n_stripes(mod(w-1, size(Rf.stripes, 1)) + 1)), ...
           @(w) sprintf('d = %.2f', Rf.spot_d(mod(w-1, size(Rf.spots, 1)) + 1))};
-fprintf('resolution check at m = %.4f (%s)\n', m_target, br_files(newest).name);
+fprintf('resolution check at m = %.4f (%s)\n', m_target, strjoin(br_names, ' + '));
 
 dE = cell(1, 3);
 for F = 1:3

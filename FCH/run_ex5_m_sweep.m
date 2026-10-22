@@ -1,7 +1,11 @@
 % Run FCH_BDF2_SAV_ex5 for each mass m in m_vals (in parallel) and plot the
 % final profile of every run in one figure.
 
-m_vals = 0.05:0.1:0.85;    % m = 0 avoided: its unstable band is a narrow sliver
+if exist('m_vals_override', 'var')
+    m_vals = m_vals_override;   % e.g. to fill gaps between earlier sweeps
+else
+    m_vals = 0.05:0.1:0.85;     % m = 0 avoided: its unstable band is a narrow sliver
+end
 nm = numel(m_vals);
 
 final_u = cell(nm, 1);
