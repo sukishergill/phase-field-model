@@ -42,12 +42,13 @@ labels = arrayfun(@(m) sprintf('start m = %.2f', m), m0, 'UniformOutput', false)
 % reference patterns (reference_patterns_sweep.m), if computed: n identical
 % stripes (gray) and ideal hex spot lattices (magenta), thin lines
 xl = [min(cellfun(@(b) min(b.m), br_cells(:))) - 0.05, max(cellfun(@(b) max(b.m), br_cells(:))) + 0.05];
-if exist('reference_patterns.mat', 'file')
-    Rf = load('reference_patterns.mat', 'stripes', 'n_stripes', 'spots', 'spot_d');
+if ~isempty(dir('reference_patterns*.mat'))
+    Rf = load_reference_patterns();     % all reference_patterns*.mat, merged
     fam = {Rf.stripes, Rf.spots};
     fam_col = {[0.45 0.45 0.45], [0.75 0 0.75]};
     fam_lab = {@(a) sprintf('%d', Rf.n_stripes(a)), @(a) sprintf('d=%.2f', Rf.spot_d(a))};
     fam_name = {'n identical stripes (label n)', 'hex spot lattice (label d)'};
+    labelled = {{}, {}};
     for F = 1:2
         for a = 1:size(fam{F}, 1)
             best = [inf, NaN];
@@ -65,9 +66,10 @@ if exist('reference_patterns.mat', 'file')
                 [emin, kmin] = min(dEin);
                 if emin < best(1), best = [emin, b.m(kmin)]; end
             end
-            if isfinite(best(1))
+            if isfinite(best(1)) && ~ismember(fam_lab{F}(a), labelled{F})
                 text(ax, best(2), best(1), fam_lab{F}(a), 'Color', fam_col{F}, 'FontSize', 8, ...
                     'VerticalAlignment', 'top', 'HorizontalAlignment', 'center');
+                labelled{F}{end+1} = fam_lab{F}(a);
             end
         end
         h(end+1) = hr; %#ok<AGROW>

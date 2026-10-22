@@ -12,7 +12,7 @@ if ~exist('stable_only', 'var'), stable_only = true; end
 br_files = dir('ex5_m_sweep_*_branches.mat');
 [~, newest] = max([br_files.datenum]);
 B = load(br_files(newest).name, 'branches');
-Rf = load('reference_patterns.mat', 'stripes', 'n_stripes', 'spots', 'spot_d');
+Rf = load_reference_patterns();     % all reference_patterns*.mat, merged
 
 fprintf('%s vs reference_patterns.mat (stable_only = %d)\n', br_files(newest).name, stable_only);
 fprintf(' start m   sweep dE     best stripes dE (n)   best hex spots dE (d)   sweep - best ref\n');

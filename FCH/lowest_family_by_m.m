@@ -8,14 +8,14 @@
 % state within tie_tol of a reference counts as that reference pattern.
 
 stable_only = true;     % false: also count unstable stretches of every family
-tie_tol = 1e-6;         % "other" within this of a reference is that reference pattern
+tie_tol = 5e-6;         % "other" within this of a reference is that reference pattern (covers interpolation error between branch points)
 dm = 0.001;
 mq = 0:dm:0.95;         % tau = 0: E is symmetric under u -> -u, m -> -m
 
 br_files = dir('ex5_m_sweep_*_branches.mat');
 [~, newest] = max([br_files.datenum]);
 B = load(br_files(newest).name, 'branches');
-Rf = load('reference_patterns.mat', 'stripes', 'n_stripes', 'spots', 'spot_d');
+Rf = load_reference_patterns();     % all reference_patterns*.mat, merged
 
 names = {'hex spots', 'stripes', 'other'};
 fams = {Rf.spots, Rf.stripes, B.branches};
