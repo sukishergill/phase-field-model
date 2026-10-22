@@ -17,7 +17,13 @@
 %             ideal-lattice energy per area. Stability: cell-periodic even
 %             perturbations, including ones that make the spots unequal.
 %
-% Results are saved to reference_patterns.mat.
+% Settings (set any of these before running the script to override):
+%   ref_parts      {'stripes', 'spots'}: which families to compute
+%   ref_ds_max     continuation ds_max ([] = continuation_FCH default)
+%   ref_max_steps  continuation max_steps per branch (3000)
+%   ref_out        output file ('reference_patterns.mat'); any
+%                  reference_patterns*.mat is merged by load_reference_patterns
+% Hex branches run in parallel (parfor) when a pool is available.
 
 Para.epsilon = 0.18;
 Para.eta1 = Para.epsilon^2;
@@ -28,11 +34,20 @@ L = 4*pi;
 dx = 2*pi/64;                     % grid spacing of the 128^2, L = 4*pi sweep
 layer = @(s) (1 - tanh(s / (sqrt(2)*ep))) / 2;   % ~1 inside (s < 0), ~0 outside
 
-copts = struct('even', true, 'max_steps', 3000, 'verbose', false, 'm_range', [-0.95 0.95]);
+if ~exist('ref_parts', 'var'), ref_parts = {'stripes', 'spots'}; end
+if ~exist('ref_ds_max', 'var'), ref_ds_max = []; end
+if ~exist('ref_max_steps', 'var'), ref_max_steps = 3000; end
+if ~exist('ref_out', 'var'), ref_out = 'reference_patterns.mat'; end
+
+copts = struct('even', true, 'max_steps', ref_max_steps, 'verbose', false, 'm_range', [-0.95 0.95]);
+if ~isempty(ref_ds_max), copts.ds_max = ref_ds_max; end
 dirs = [1 -1];
+fprintf('reference patterns: %s, ds_max = %s, max_steps = %d -> %s\n', strjoin(ref_parts, ' + '), ...
+    mat2str(ref_ds_max), ref_max_steps, ref_out);
 
 %% stripes
 n_stripes = 1:8;
+if ~ismember('stripes', ref_parts), n_stripes = []; end
 w = 0.5;                                          % initial stripe width
 stripes = cell(numel(n_stripes), 2);
 for a = 1:numel(n_stripes)
@@ -53,31 +68,39 @@ end
 
 %% hexagonal spot lattices
 Nx_cells = [16 20 24 32];                         % cell widths d = Nx*dx: 1.57, 1.96, 2.36, 3.14
+if ~ismember('spots', ref_parts), Nx_cells = []; end
 R = 0.6;                                          % initial spot radius
-spots = cell(numel(Nx_cells), 2);
-spot_d = zeros(size(Nx_cells));
-for a = 1:numel(Nx_cells)
+ncell = numel(Nx_cells);
+spot_d = Nx_cells * dx;
+cells = cell(ncell, 1);                           % grid, initial state, symmetry per cell
+for a = 1:ncell
     Nx = Nx_cells(a);
-    d = Nx * dx;
+    d = spot_d(a);
     Ny = 2*round(d*sqrt(3) / (2*dx));             % even, same spacing as x
     Ly = Ny * dx;
-    spot_d(a) = d;
     G = SSAV_FCH_helpers.generate_Grid([d, Ly], [Nx, Ny], 2);
     % spots at the origin and at the cell corners (+-d/2, +-Ly/2): even in x and y
     r1 = hypot(G.xx, G.yy);
     ddx = G.xx - d/2;   ddx = ddx - d*round(ddx/d);
     ddy = G.yy - Ly/2;  ddy = ddy - Ly*round(ddy/Ly);
     r2 = hypot(ddx, ddy);
-    u = 1 - 2*layer(r1 - R) - 2*layer(r2 - R);
-    half_shift = @(v) (v + circshift(v, [Ny/2, Nx/2])) / 2;   % spot at origin <-> corners
-    for dd = 1:2
-        o = copts;  o.direction = dirs(dd);  o.symmetry = half_shift;
-        spots{a, dd} = continuation_FCH(u, G, Para, o);
-    end
-    fprintf('hex spots d = %.2f (%dx%d, aspect %.4f vs sqrt(3) = %.4f): m in [%.3f, %.3f], folds %d (%s | %s)\n', ...
-        d, Nx, Ny, Ly/d, sqrt(3), min([spots{a,1}.m spots{a,2}.m]), max([spots{a,1}.m spots{a,2}.m]), ...
+    cells{a} = struct('G', G, 'u', 1 - 2*layer(r1 - R) - 2*layer(r2 - R), ...
+        'half_shift', @(v) (v + circshift(v, [Ny/2, Nx/2])) / 2, ...   % spot at origin <-> corners
+        'Nx', Nx, 'Ny', Ny, 'aspect', Ly/d);
+end
+spots = cell(ncell, 2);
+parfor job = 1:2*ncell
+    [a, dd] = ind2sub([ncell, 2], job);
+    o = copts;  o.direction = dirs(dd);  o.symmetry = cells{a}.half_shift;
+    spots{job} = continuation_FCH(cells{a}.u, cells{a}.G, Para, o);
+end
+spots = reshape(spots, ncell, 2);
+for a = 1:ncell
+    fprintf('hex spots d = %.2f (%dx%d, aspect %.4f vs sqrt(3) = %.4f): m in [%.3f, %.3f], %d + %d points, folds %d (%s | %s)\n', ...
+        spot_d(a), cells{a}.Nx, cells{a}.Ny, cells{a}.aspect, sqrt(3), min([spots{a,1}.m spots{a,2}.m]), ...
+        max([spots{a,1}.m spots{a,2}.m]), numel(spots{a,1}.m), numel(spots{a,2}.m), ...
         sum(spots{a,1}.fold) + sum(spots{a,2}.fold), spots{a,1}.stop_reason, spots{a,2}.stop_reason);
 end
 
-save('reference_patterns.mat', 'stripes', 'n_stripes', 'spots', 'spot_d', 'Nx_cells', 'Para', 'copts', '-v7.3');
-fprintf('Saved reference_patterns.mat\n');
+save(ref_out, 'stripes', 'n_stripes', 'spots', 'spot_d', 'Nx_cells', 'Para', 'copts', '-v7.3');
+fprintf('Saved %s\n', ref_out);
