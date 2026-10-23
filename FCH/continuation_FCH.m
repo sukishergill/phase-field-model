@@ -39,7 +39,8 @@ function branch = continuation_FCH(u0, Grid, Para, opts)
 %                    (the even-mode chord corrector typically needs 4-7,
 %                    so a threshold of 3 kept ds from ever growing back
 %                    after a failure halved it)
-%     stop_at_fold   stop at the first fold in m                (false)
+%     stop_at_fold   stop at the first fold in m (true), or at the
+%                    k-th fold (a number k)                     (false)
 %     max_steps      max continuation steps                     (200)
 %     m_range        stop when m leaves [m_min, m_max]          ([-0.95 0.95])
 %     even           stay in the even subspace                  (false)
@@ -211,8 +212,9 @@ for step = 1:opts.max_steps
             break
         end
     end
-    if opts.stop_at_fold && any(branch.fold)
-        stop_reason = sprintf('fold at m = %.4f', branch.m(find(branch.fold, 1)));
+    if opts.stop_at_fold && sum(branch.fold) >= double(opts.stop_at_fold)
+        kf_all = find(branch.fold);
+        stop_reason = sprintf('fold %d at m = %.4f', numel(kf_all), branch.m(kf_all(end)));
         break
     end
     % closed loop (isola): back within one step of the start after having
