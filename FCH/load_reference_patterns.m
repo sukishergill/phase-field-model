@@ -8,6 +8,10 @@ function Rf = load_reference_patterns(files)
 %   Rf = load_reference_patterns()          % all reference_patterns*.mat
 %   Rf = load_reference_patterns({'a.mat'}) % given files
 %
+% Honeycomb branches (light lattices with d >= 4, reference_patterns_sweep
+% part 'honeycomb') are returned separately as Rf.honeycomb / honey_d /
+% honey_label.
+%
 % Hex-cell branches can jump onto other patterns that fit the cell -- with
 % ds_max = 0.2 one d = 3.14 branch ended up on two straight stripes, which
 % then counted as "hex spots". Points of a spot branch that are stripes
@@ -20,7 +24,8 @@ if nargin < 1
     files = {f.name};
 end
 Rf = struct('stripes', {cell(0, 2)}, 'n_stripes', [], 'spots', {cell(0, 2)}, ...
-    'spot_d', [], 'spot_label', {{}}, 'files', {files}, 'n_dropped', 0);
+    'spot_d', [], 'spot_label', {{}}, 'honeycomb', {cell(0, 2)}, 'honey_d', [], ...
+    'honey_label', {{}}, 'files', {files}, 'n_dropped', 0);
 for k = 1:numel(files)
     S = load(files{k});
     if ~isfield(S, 'spot_label')            % older files: dark spots only
@@ -42,6 +47,22 @@ for k = 1:numel(files)
         S.spots{j} = b;
     end
     Rf.spots = [Rf.spots; S.spots];
+    if isfield(S, 'honeycomb') && ~isempty(S.honeycomb)
+        for j = 1:numel(S.honeycomb)            % drop points that became stripes
+            b = S.honeycomb{j};
+            for kp = 1:numel(b.m)
+                vx = mean(std(b.u{kp}, 0, 2));  vy = mean(std(b.u{kp}, 0, 1));
+                if min(vx, vy) < 0.05*max(vx, vy)
+                    b.dE(kp) = NaN;
+                    Rf.n_dropped = Rf.n_dropped + 1;
+                end
+            end
+            S.honeycomb{j} = b;
+        end
+        Rf.honeycomb = [Rf.honeycomb; S.honeycomb];
+        Rf.honey_d = [Rf.honey_d, S.honey_d];
+        Rf.honey_label = [Rf.honey_label, S.honey_label];
+    end
     Rf.spot_d = [Rf.spot_d, S.spot_d];
     Rf.spot_label = [Rf.spot_label, S.spot_label];
 end

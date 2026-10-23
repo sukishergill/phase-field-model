@@ -1,9 +1,10 @@
 % Which pattern family has the lowest dE = E - E_uniform(m) at each mass:
 %   hex spots  hex lattices of dark spots (any d) and of light domains with
 %              d < 4                     (reference_patterns*.mat)
-%   honeycomb  hex lattices of light domains with d >= 4 (membrane cells),
-%              best stable spacing at each scanned m, cells that fit the
-%              box                        (honeycomb_scan.mat, interpolated)
+%   honeycomb  hex lattices of light domains with d >= 4 (membrane cells):
+%              continuation branches (reference_patterns_honeycomb.mat) if
+%              present, else the best stable spacing per scanned m
+%              (honeycomb_scan.mat, interpolated)
 %   stripes    n identical stripes        (reference_patterns*.mat)
 %   other      the m-sweep branches       (all *_tofold_branches.mat, merged)
 % The spots / honeycomb split at d = 4 is a convention: light lattices turn
@@ -31,7 +32,9 @@ who = nan(nf, numel(mq));
 % honeycomb: best stable spacing from honeycomb_scan, linear in m between
 % scanned masses (only where both neighbouring scan points have one)
 HC = struct('hc_m', [], 'E_honey', [], 'd_honey', []);
-if exist('honeycomb_scan.mat', 'file')
+if ~isempty(Rf.honeycomb)
+    [env(2, :), who(2, :)] = lowest_dE_at_m(Rf.honeycomb, mq, stable_only);   % continuation branches
+elseif exist('honeycomb_scan.mat', 'file')
     HC = load('honeycomb_scan.mat', 'hc_m', 'E_honey', 'd_honey');
     for q = 1:numel(mq)
         a = find(HC.hc_m <= mq(q), 1, 'last');
@@ -80,7 +83,7 @@ while k <= numel(mq)
     k = j + 1;
 end
 fprintf('"other" (sweep) branches cover m in: %s\n', intervals_str(mq, ~isinf(env(4, :)) | same));
-if exist('HC', 'var')
+if isempty(Rf.honeycomb) && ~isempty(HC.hc_m)
     fprintf('honeycomb scanned at m = %.2f..%.2f (no stable honeycomb at m = %s)\n', HC.hc_m(1), HC.hc_m(end), ...
         mat2str(HC.hc_m(~isfinite(HC.E_honey))));
 end
@@ -116,7 +119,11 @@ switch F
         i = mod(w - 1, size(Rf.spots, 1)) + 1;     % row = member
         s = Rf.spot_label{i};
     case 2
-        s = sprintf('d=%.2f', HC.d_honey(w));
+        if ~isempty(Rf.honeycomb)
+            s = Rf.honey_label{mod(w - 1, size(Rf.honeycomb, 1)) + 1};
+        else
+            s = sprintf('d=%.2f', HC.d_honey(w));
+        end
     case 3
         i = mod(w - 1, size(Rf.stripes, 1)) + 1;
         s = sprintf('n=%d', Rf.n_stripes(i));

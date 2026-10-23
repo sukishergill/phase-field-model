@@ -21,7 +21,11 @@
 %   ref_parts      {'stripes', 'spots'}: which families to compute; add
 %                  'spots_light' for hex lattices of light spots (u ~ +1
 %                  in u ~ -1) on exact hex cells, spacings ref_light_d,
-%                  started at ref_light_m(d) (saved as spots, with labels)
+%                  started at ref_light_m(d) (saved as spots, with labels);
+%                  add 'honeycomb' for light lattices with d >= 4 at
+%                  spacings ref_honey_d, each started at every mass in
+%                  ref_honey_m0 (coexisting states), saved as honeycomb
+%   ref_m_range    continuation m range ([-0.95 0.95])
 %   ref_ds_max     continuation ds_max ([] = continuation_FCH default)
 %   ref_max_steps  continuation max_steps per branch (3000)
 %   ref_out        output file ('reference_patterns.mat'); any
@@ -43,8 +47,11 @@ if ~exist('ref_max_steps', 'var'), ref_max_steps = 3000; end
 if ~exist('ref_out', 'var'), ref_out = 'reference_patterns.mat'; end
 if ~exist('ref_light_d', 'var'), ref_light_d = [1.3 1.45 1.6 1.8 2.0 2.3 2.6 3.0 3.35]; end
 if ~exist('ref_light_m', 'var'), ref_light_m = @(d) 0.118 + (d > 1.85)*(0.35 - 0.118); end
+if ~exist('ref_honey_d', 'var'), ref_honey_d = 4.0:0.5:7.0; end
+if ~exist('ref_honey_m0', 'var'), ref_honey_m0 = [0.40 0.50]; end
+if ~exist('ref_m_range', 'var'), ref_m_range = [-0.95 0.95]; end
 
-copts = struct('even', true, 'max_steps', ref_max_steps, 'verbose', false, 'm_range', [-0.95 0.95]);
+copts = struct('even', true, 'max_steps', ref_max_steps, 'verbose', false, 'm_range', ref_m_range);
 if ~isempty(ref_ds_max), copts.ds_max = ref_ds_max; end
 dirs = [1 -1];
 fprintf('reference patterns: %s, ds_max = %s, max_steps = %d -> %s\n', strjoin(ref_parts, ' + '), ...
@@ -146,5 +153,37 @@ if ismember('spots_light', ref_parts)
     spot_label = [spot_label, arrayfun(@(d) sprintf('d=%.2f light', d), ref_light_d, 'UniformOutput', false)];
 end
 
-save(ref_out, 'stripes', 'n_stripes', 'spots', 'spot_d', 'spot_label', 'Nx_cells', 'Para', 'copts', '-v7.3');
+%% honeycombs: light lattices with d >= 4, several starting masses each
+honeycomb = cell(0, 2);
+honey_d = [];
+honey_label = {};
+if ismember('honeycomb', ref_parts)
+    [Dg, Mg] = meshgrid(ref_honey_d, ref_honey_m0);
+    starts = [Dg(:), Mg(:)];                      % one row per (d, m0)
+    ns = size(starts, 1);
+    hstate = cell(ns, 1);
+    parfor a = 1:ns                               % starting states, polished at (d, m0)
+        [u0, G0] = SSAV_FCH_helpers.hex_lattice_state(starts(a, 2), starts(a, 1), 'light', Para, 0.098);
+        hstate{a} = struct('u', u0, 'G', G0);
+    end
+    honeycomb = cell(ns, 2);
+    half_shift = @(v) (v + circshift(v, size(v)/2)) / 2;
+    parfor job = 1:2*ns
+        [a, dd] = ind2sub([ns, 2], job);
+        o = copts;  o.direction = dirs(dd);  o.symmetry = half_shift;  o.polish_first = false;
+        honeycomb{job} = continuation_FCH(hstate{a}.u, hstate{a}.G, Para, o);
+    end
+    honeycomb = reshape(honeycomb, ns, 2);
+    honey_d = starts(:, 1)';
+    honey_label = arrayfun(@(a) sprintf('d=%.2f (from m %.2f)', starts(a, 1), starts(a, 2)), 1:ns, 'UniformOutput', false);
+    for a = 1:ns
+        fprintf('honeycomb d = %.2f from m = %.2f: m in [%.3f, %.3f], %d + %d points, folds %d (%s | %s)\n', ...
+            starts(a, 1), starts(a, 2), min([honeycomb{a,1}.m honeycomb{a,2}.m]), max([honeycomb{a,1}.m honeycomb{a,2}.m]), ...
+            numel(honeycomb{a,1}.m), numel(honeycomb{a,2}.m), sum(honeycomb{a,1}.fold) + sum(honeycomb{a,2}.fold), ...
+            honeycomb{a,1}.stop_reason, honeycomb{a,2}.stop_reason);
+    end
+end
+
+save(ref_out, 'stripes', 'n_stripes', 'spots', 'spot_d', 'spot_label', 'honeycomb', 'honey_d', 'honey_label', ...
+    'Nx_cells', 'Para', 'copts', '-v7.3');
 fprintf('Saved %s\n', ref_out);
