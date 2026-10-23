@@ -37,16 +37,20 @@ end
 labels = arrayfun(@(m) sprintf('start m = %.2f', m), m0, 'UniformOutput', false);
 
 % reference patterns (reference_patterns_sweep.m), if computed: n identical
-% stripes (gray) and ideal hex spot lattices (magenta), thin lines
+% stripes (gray), ideal hex spot lattices (magenta) and honeycombs (teal),
+% thin lines
 xl = [min(cellfun(@(b) min(b.m), br_cells(:))) - 0.05, max(cellfun(@(b) max(b.m), br_cells(:))) + 0.05];
 if ~isempty(dir('reference_patterns*.mat'))
     Rf = load_reference_patterns();     % all reference_patterns*.mat, merged
-    fam = {Rf.stripes, Rf.spots};
-    fam_col = {[0.45 0.45 0.45], [0.75 0 0.75]};
-    fam_lab = {@(a) sprintf('%d', Rf.n_stripes(a)), @(a) Rf.spot_label{a}};
-    fam_name = {'n identical stripes (label n)', 'hex spot lattice (label d)'};
-    labelled = {{}, {}};
-    for F = 1:2
+    fam = {Rf.stripes, Rf.spots, Rf.honeycomb};
+    fam_col = {[0.45 0.45 0.45], [0.75 0 0.75], [0.1 0.6 0.6]};
+    fam_lab = {@(a) sprintf('%d', Rf.n_stripes(a)), @(a) Rf.spot_label{a}, ...
+               @(a) sprintf('d=%.1f', Rf.honey_d(a))};
+    fam_name = {'n identical stripes (label n)', 'hex spot lattice (label d)', ...
+                'honeycomb, light d >= 4 (label d)'};
+    labelled = {{}, {}, {}};
+    for F = 1:numel(fam)
+        if isempty(fam{F}), continue, end
         for a = 1:size(fam{F}, 1)
             best = [inf, NaN];
             for d = 1:size(fam{F}, 2)
