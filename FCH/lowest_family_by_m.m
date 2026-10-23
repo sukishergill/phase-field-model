@@ -1,9 +1,15 @@
 % Which pattern family has the lowest dE = E - E_uniform(m) at each mass:
-%   hex spots  ideal hex spot lattices   (reference_patterns.mat)
-%   stripes    n identical stripes        (reference_patterns.mat)
+%   hex spots  hex lattices of dark spots (any d) and of light domains with
+%              d < 4                     (reference_patterns*.mat)
+%   honeycomb  hex lattices of light domains with d >= 4 (membrane cells),
+%              best stable spacing at each scanned m, cells that fit the
+%              box                        (honeycomb_scan.mat, interpolated)
+%   stripes    n identical stripes        (reference_patterns*.mat)
 %   other      the m-sweep branches       (all *_tofold_branches.mat, merged)
+% The spots / honeycomb split at d = 4 is a convention: light lattices turn
+% continuously into honeycombs as d grows.
 % Prints the m-intervals each family wins, with the margin to the runner-up,
-% and plots the three lower envelopes. "other" only exists where the sweep
+% and plots the lower envelopes. "other" only exists where the sweep
 % branches reach, so outside those m it cannot win by construction; a sweep
 % state within tie_tol of a reference counts as that reference pattern.
 
@@ -13,23 +19,40 @@ dm = 0.001;
 mq = 0:dm:0.95;         % tau = 0: E is symmetric under u -> -u, m -> -m
 
 B.branches = load_sweep_branches();     % all continue_m_sweep outputs, merged
-Rf = load_reference_patterns();     % all reference_patterns*.mat, merged
+Rf = load_reference_patterns();         % all reference_patterns*.mat, merged
 
-names = {'hex spots', 'stripes', 'other'};
-fams = {Rf.spots, Rf.stripes, B.branches};
-env = zeros(3, numel(mq));
-who = zeros(3, numel(mq));
-for F = 1:3
-    [env(F, :), who(F, :)] = lowest_dE_at_m(fams{F}, mq, stable_only);
+names = {'hex spots', 'honeycomb', 'stripes', 'other'};
+nf = numel(names);
+env = inf(nf, numel(mq));
+who = nan(nf, numel(mq));
+[env(1, :), who(1, :)] = lowest_dE_at_m(Rf.spots, mq, stable_only);
+[env(3, :), who(3, :)] = lowest_dE_at_m(Rf.stripes, mq, stable_only);
+[env(4, :), who(4, :)] = lowest_dE_at_m(B.branches, mq, stable_only);
+% honeycomb: best stable spacing from honeycomb_scan, linear in m between
+% scanned masses (only where both neighbouring scan points have one)
+HC = struct('hc_m', [], 'E_honey', [], 'd_honey', []);
+if exist('honeycomb_scan.mat', 'file')
+    HC = load('honeycomb_scan.mat', 'hc_m', 'E_honey', 'd_honey');
+    for q = 1:numel(mq)
+        a = find(HC.hc_m <= mq(q), 1, 'last');
+        if isempty(a) || a == numel(HC.hc_m)
+            if ~isempty(a) && abs(HC.hc_m(a) - mq(q)) < 1e-12, env(2, q) = HC.E_honey(a); who(2, q) = a; end
+            continue
+        end
+        t = (mq(q) - HC.hc_m(a)) / (HC.hc_m(a+1) - HC.hc_m(a));
+        env(2, q) = (1 - t)*HC.E_honey(a) + t*HC.E_honey(a+1);     % inf if either is inf
+        who(2, q) = a + (t > 0.5);
+    end
+    env(2, isnan(env(2, :))) = inf;
 end
-% label of the winning member: d for spots, n for stripes, start m for sweep
-member = @(F, w) member_label(F, w, Rf, B);
+% label of the winning member: d for spots / honeycomb, n for stripes, start m for sweep
+member = @(F, w) member_label(F, w, Rf, B, HC);
 
 % a sweep state within tie_tol of a reference is the same pattern (e.g.
 % the m = 0.85 sweep state is a single stripe): credit the reference
-same = abs(env(3, :) - min(env(1:2, :), [], 1)) < tie_tol;
-env(3, same) = inf;
-who(3, same) = NaN;
+same = abs(env(4, :) - min(env(1:3, :), [], 1)) < tie_tol;
+env(4, same) = inf;
+who(4, same) = NaN;
 [best, win] = min(env, [], 1);
 win(~isfinite(best)) = 0;
 sorted = sort(env, 1);
@@ -56,19 +79,22 @@ while k <= numel(mq)
     end
     k = j + 1;
 end
-cover = ~isinf(env(3, :));
-fprintf('"other" (sweep) branches cover m in: %s\n', intervals_str(mq, cover));
+fprintf('"other" (sweep) branches cover m in: %s\n', intervals_str(mq, ~isinf(env(4, :)) | same));
+if exist('HC', 'var')
+    fprintf('honeycomb scanned at m = %.2f..%.2f (no stable honeycomb at m = %s)\n', HC.hc_m(1), HC.hc_m(end), ...
+        mat2str(HC.hc_m(~isfinite(HC.E_honey))));
+end
 
-%% plot: the three lower envelopes, the overall minimum marked by family
-cols = [0.75 0 0.75; 0.45 0.45 0.45; 0.85 0.33 0.1];
+%% plot: the lower envelopes, the overall minimum marked by family
+cols = [0.75 0 0.75; 0.1 0.6 0.6; 0.45 0.45 0.45; 0.85 0.33 0.1];
 f = figure('Position', [100 100 1100 650]);
 ax = axes(f); hold(ax, 'on');
-h = gobjects(3, 1);
-for F = 1:3
+h = gobjects(nf, 1);
+for F = 1:nf
     y = env(F, :); y(~isfinite(y)) = NaN;
     h(F) = plot(ax, mq, y, '-', 'Color', cols(F, :), 'LineWidth', 1.2);
 end
-for F = 1:3
+for F = 1:nf
     y = best; y(win ~= F) = NaN;
     plot(ax, mq, y, '-', 'Color', cols(F, :), 'LineWidth', 5);
 end
@@ -81,18 +107,21 @@ xlim(ax, [mq(1) mq(end)]);
 exportgraphics(f, 'lowest_family_by_m.png', 'Resolution', 110);
 fprintf('Saved lowest_family_by_m.png\n');
 
-function s = member_label(F, w, Rf, B)
+function s = member_label(F, w, Rf, B, HC)
 if isnan(w), s = '-'; return, end
 % w is a linear index into the family's (member x direction) cell array
+% (for the honeycomb: an index into the scanned masses)
 switch F
     case 1
         i = mod(w - 1, size(Rf.spots, 1)) + 1;     % row = member
         s = Rf.spot_label{i};
     case 2
-        i = mod(w - 1, size(Rf.stripes, 1)) + 1;     % row = member
-        s = sprintf('n=%d', Rf.n_stripes(i));
+        s = sprintf('d=%.2f', HC.d_honey(w));
     case 3
-        i = mod(w - 1, size(B.branches, 1)) + 1;     % row = member
+        i = mod(w - 1, size(Rf.stripes, 1)) + 1;
+        s = sprintf('n=%d', Rf.n_stripes(i));
+    case 4
+        i = mod(w - 1, size(B.branches, 1)) + 1;
         s = sprintf('start %.2f', B.branches{i, 1}.m(1));
 end
 end
