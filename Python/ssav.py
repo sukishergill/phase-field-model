@@ -13,6 +13,7 @@ class Output:
     u: np.ndarray
     Eu: np.ndarray
     tt: np.ndarray
+    dt: np.ndarray
 
 
 def ssav(Grid, Time, Para, u, dim):
@@ -63,7 +64,7 @@ def ssav(Grid, Time, Para, u, dim):
         P1 = -Para.eps**2*G*(D**2) - Para.S*G
 
     else:
-        P1 = Para.eps**2*G*(D**2) - Para.S*G
+        P1 = Para.alpha*Para.eps**2 + Para.eps**2*G*(D**2) - Para.S*G
 
     P = 1/dt + P1
 
@@ -96,7 +97,9 @@ def ssav(Grid, Time, Para, u, dim):
     ##################################################
     while t < Time.tf:
 
-        u_new, w_new = compute_unew(u, ufft, u_old, uold_fft, w, w_old, dt, dt_new,
+        step_dt = dt_new
+
+        u_new, w_new = compute_unew(u, ufft, u_old, uold_fft, w, w_old, dt, step_dt,
                                     Para, Grid,G, P1, t)
 
         unew_fft = fftn(u_new)
@@ -109,7 +112,7 @@ def ssav(Grid, Time, Para, u, dim):
             dt_new = dt
 
         else:
-            dt = dt_new
+            dt = step_dt
             dt_new = compute_dtnew(abs(E_t), Para.err_tol, Para.delta, dt,
                                    Time.dt_min, Time.dt_max)
 
@@ -125,9 +128,15 @@ def ssav(Grid, Time, Para, u, dim):
         uold_fft = ufft
         ufft = unew_fft
 
-        t += dt
+        t += step_dt
         tt.append(t)
 
-    Results = Output(u=u, Eu=E, tt=tt)
+
+    t = np.array(tt[0:-1])
+    t_new = np.array(tt[1:])
+
+    dt_vals = t_new - t
+    
+    Results = Output(u=u, Eu=E, tt=tt, dt=dt_vals)
 
     return Results

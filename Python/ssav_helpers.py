@@ -8,15 +8,6 @@ def compute_E(ufft, w, Grid, Para, D, dim):
     En = w**2 - Para.B
 
     e = 0.5*Para.eps**2
-    # ux = np.real(ifftn(-1j * Grid.kxx * ufft))
-    # uy = np.real(ifftn(-1j * Grid.kyy * ufft))
-
-    # du = ux**2 + uy**2
-
-    # En = np.sum(0.5 * Para.eps**2 * du)*Grid.dV + w**2 - Para.B
-    
-    # En += np.sum(e*du) * Grid.dV
-    # e = Para.eps**2 / 2
 
     if Para.model == "PFC":
         du = np.real(ifftn(D*ufft))
@@ -103,7 +94,8 @@ def compute_ip(Hs, psi_r, psi_H, Grid):
 
 def compute_unew(u_curr, ucurr_fft, u_prev, uprev_fft, w_curr, w_prev, dt, dt_new, Para, Grid, G, P1, t):
 
-    us = compute_us(u_curr, u_prev, dt_new/dt)
+    gamma = dt_new/dt
+    us = compute_us(u_curr, u_prev, gamma)
 
     F, f = compute_F(us, Para.beta)
 
@@ -117,7 +109,7 @@ def compute_unew(u_curr, ucurr_fft, u_prev, uprev_fft, w_curr, w_prev, dt, dt_ne
 
     H2 = fftn(Hs)
 
-    r, r_hat = compute_r(us, 2*ucurr_fft - uprev_fft, u_curr, u_prev, w_curr, w_prev, Hs, H2, a, b, c, Grid, Para, G, t + dt, dt)
+    r, r_hat = compute_r(us, (1 + gamma) * ucurr_fft - gamma*uprev_fft, u_curr, u_prev, w_curr, w_prev, Hs, H2, a, b, c, Grid, Para, G, t + dt, dt)
 
     P = a + P1
 
