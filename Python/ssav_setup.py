@@ -10,7 +10,7 @@ class Parameters:
     eps: float
     m: float
 
-    
+    # Optional parameters
     alpha: Optional[float] = None
     beta: Optional[float] = None
     delta: Optional[float] = None
