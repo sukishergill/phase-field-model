@@ -30,49 +30,55 @@ def ssav(Grid, Time, Para, u, dim):
     else:
         D = -1j*Grid.k
 
-    if Para.model == "AC":
-        G = -1
+    # Define linear operators
+    if Para.model == "FCH":
+        L0 = Para.eps**4*Grid.k6 + Para.S*Grid.k4
+        L1 = (Para.eps**2 * (2 + Para.eta1 + 2*Para.tau**2/3) + Para.S) * Grid.k4
 
     else:
-        G = -Grid.k2
+        L1 = Para.S*Grid.k2
+        
+        if Para.model == "PFC":
+            L0 = -Para.eps**2*Grid.k2*(D**2) + Para.S*Grid.k2
+
+        else:
+            L0 = Para.alpha*Para.eps**2 - Para.eps**2*Grid.k2*(D**2) + Para.S*Grid.k2
+
 
     ufft = fftn(u)
 
     ##################################################
     ######## Compute u^1 using backward Euler ########
     ##################################################
-    F, f = compute_F(u, Para.beta)
-    int_F = np.sum(F) * Grid.dV
+    F, F1, F2 = compute_F(u, Para.beta, Para.tau)
+    G = compute_G(u, ufft, Para, F, F1, Grid, dim)
 
     # Define this as w_old b/c we will need it in the loop below
-    w_old = compute_w(int_F, Para.B)
+    w_old = compute_w(G, Para.B)
 
     E = []
     E.append(compute_E(ufft, w_old, Grid, Para, D, dim))
 
-    H = compute_H(f, w_old)
+    if Para.model == "FCH":
+        H = compute_H_FCH(u, w_old, Para, F1, F2, Grid, dim)
+
+    else:
+        H = compute_H(F1, w_old)
 
     r = -0.5 * np.sum(H*u)*Grid.dV + w_old
     H2 = fftn(H)
 
-    r_tilde = u/dt - Para.S*np.real(ifftn(G*ufft)) - r*np.real(ifftn(G*H2))
-
-    r_hat = r_tilde
-
-    # Define linear operator
-    if Para.model == "PFC":
-        P1 = -Para.eps**2*G*(D**2) - Para.S*G
-
-    else:
-        P1 = Para.alpha*Para.eps**2 + Para.eps**2*G*(D**2) - Para.S*G
-
-    P = 1/dt + P1
+    r_tilde = u/dt + np.real(ifftn(L1*ufft)) + r*np.real(ifftn(-Grid.k2*H2))
+    
+    r_hat = r_tilde + (Para.alpha*Para.eps**2) / (Grid.V) * np.sum(r_tilde)*Grid.dV
+    
+    Ln = 1/dt + L0
 
     r_hat = fftn(r_hat)
-    psi_r = r_hat / P
+    psi_r = r_hat / Ln
     psi_r = np.real(ifftn(psi_r))
 
-    psi_H = (G * H2) / P
+    psi_H = (-Grid.k2 * H2) / Ln
     psi_H = np.real(ifftn(psi_H))
 
     innprod_Hu = compute_ip(H, psi_r, psi_H, Grid)
@@ -100,13 +106,13 @@ def ssav(Grid, Time, Para, u, dim):
         step_dt = dt_new
 
         u_new, w_new = compute_unew(u, ufft, u_old, uold_fft, w, w_old, dt, step_dt,
-                                    Para, Grid,G, P1, t)
+                                    Para, Grid, L0, L1, t, dim)
 
         unew_fft = fftn(u_new)
 
         E_new = compute_E(unew_fft, w_new, Grid, Para, D, dim)
 
-        E_t = (E_new - E_curr) / dt
+        E_t = (E_new - E_curr) / step_dt
 
         if Time.dt_min == Time.dt_max:
             dt_new = dt
