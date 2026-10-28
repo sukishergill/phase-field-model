@@ -97,7 +97,8 @@ P = 1/dt + P1;
 r_hat = fftn(r_hat);        num_fft = num_fft + 1;
 psi_r = P .\ r_hat;         psi_r = ifftn(psi_r, 'symmetric');
 
-psi_H = P .\ (G .* H2);     psi_H = ifftn(psi_H, 'symmetric');
+% psi_H = P .\ (G .* H2);     psi_H = ifftn(psi_H, 'symmetric');
+psi_H = P .\ (-Grid.k2 .* H);     psi_H = ifftn(psi_H, 'symmetric');
 
 innprod_Hu = SSAV_FCH_helpers.compute_ip(H, psi_r, psi_H, prod(Grid.d));
 
@@ -172,7 +173,8 @@ while t < Time.tf
 
     psi_r = P .\ r_hat;         psi_r = ifftn(psi_r, 'symmetric');
 
-    psi_H = P .\ (G .* H);     psi_H = ifftn(psi_H, 'symmetric');
+    % psi_H = P .\ (G .* H);     psi_H = ifftn(psi_H, 'symmetric');
+    psi_H = P .\ (-Grid.k2 .* H);     psi_H = ifftn(psi_H, 'symmetric');
 
     innprod_Hu = SSAV_FCH_helpers.compute_ip(H_snew, psi_r, psi_H, ...
         prod(Grid.d));
@@ -193,7 +195,7 @@ while t < Time.tf
 
     l = 0;
     if Time.dt_max ~= Time.dt_min
-    while E_t > 1e-5 && dt_new > Time.dt_min && l <= 5
+    while E_t > 1e-8 && dt_new > Time.dt_min && l <= 5
 
         reject_steps = reject_steps + 1;
 
@@ -232,7 +234,7 @@ while t < Time.tf
 
         psi_r = P .\ r_hat;         psi_r = ifftn(psi_r, 'symmetric');
 
-        psi_H = P .\ (G .* H);     psi_H = ifftn(psi_H, 'symmetric');
+        psi_H = P .\ (-Grid.k2 .* H);     psi_H = ifftn(psi_H, 'symmetric');
 
         innprod_Hu = SSAV_FCH_helpers.compute_ip(H_snew, psi_r, psi_H, ...
             prod(Grid.d));
