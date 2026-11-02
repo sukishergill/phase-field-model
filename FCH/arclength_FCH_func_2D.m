@@ -47,6 +47,7 @@ function [u_vals, E_vals, m_vals, diagnostics] = arclength_FCH_func_2D(u0, m0, e
 %                       extend_branch (stop_reason, steps, final_ds)
 
 % eps = 0.1;      eta = eps^2;
+tic;
 
 % generate grid
 dim = 2;
@@ -142,6 +143,9 @@ stability = [fliplr(stab_dec), stab_inc(2:end)];
 
 m_vals = data(1, :);
 E_vals = data(2, :);
+
+elapsedTime = toc;
+disp(['Continuation run time:', num2str(elapsedTime), ' seconds.']);
 
 diagnostics = struct( ...
     'gd_resid', gd_resid, ...
@@ -485,7 +489,7 @@ for it = 1:maxit
 
     Mfunc = @(v) v ./ pdiag;
     
-    [dc, flag, relres, iter] = gmres(Jfun, -mu(2:end), 50, 1e-10, 100, Mfunc);
+    [dc, flag, relres, iter] = gmres(Jfun, -mu(2:end), 50, 1e-8, 200, Mfunc);
 
     if flag ~= 0
         warning('Matrix-free GMRES did not converge');
@@ -639,28 +643,98 @@ for step = 1:max_steps
             %     v(Nc+1)];
             % 
             % [dx, flag, relres, iter] = gmres(Gfun, -b, 50, 1e-6, 100, [], Mfunc);
+            % % % % tic;
+            % % % % J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
+            % % % % 
+            % % % % e1 = zeros(1, Nc);
+            % % % % e1(1) = 1;
+            % % % % 
+            % % % % Gmat = [J(2:end,:), zeros(Nc-1, 1);
+            % % % %         e1,          -1;
+            % % % %         (1/Nc)*t(1:Nc)', t(end)];
+            % % % % 
+            % % % % % Factorize once per Newton iteration.
+            % % % % [Lfac, Ufac, p] = lu(Gmat, 'vector');
+            % % % % 
+            % % % % % MATLAB's LU convention:
+            % % % % % P*R\Gmat*Q = L*U
+            % % % % % Use Gmat^{-1} as the right-preconditioning action.
+            % % % % Mfun = @(v) Ufac \ (Lfac \ v(p));
+            % % % % 
+            % % % % [dy, flag, relres, iter] = gmres( ...
+            % % % %     @(y) Gmat * Mfun(y), -b, 50, 1e-10, 100);
+            % % % % 
+            % % % % dx = Mfun(dy);
+            % % % % 
+            % % % % elapsedTime = toc; % Read elapsed time
+            % % % % disp(['Matrix solver took ', num2str(elapsedTime), ' seconds.']);
+            % % % % relres = norm(Gmat*dx + b) / max(norm(b), 1e-14);
+            % % % % fprintf('direct relres = %.3e\n', relres);
 
-            J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
 
-            e1 = zeros(1, Nc);
-            e1(1) = 1;
+            % Jtopfun = @(v) reshape(fch_jac_cos( ...
+            %     u_curr, [0, reshape(v(1:Nc-1), 1, [])],...
+            %     eps, eta, Grid),[],1);
+            % 
+            % Gfun = @(v) [ ...
+            %     Jtopfun(v(1:Nc)); ...
+            %     v(1) - v(end); ...
+            %     (1/Nc)*t(1:Nc)*v(1:Nc) + t(end)*v(end)];
+            tic;
+            Gfun = @(v) G_matrix_free( ...
+                v, u_curr, eps, eta, Grid, Nc, t);
+
+            % Check dimensions once before GMRES.
+            vtest = zeros(Nc+1, 1);
+            ytest = Gfun(vtest);
+            assert(numel(ytest) == Nc+1, 'Incorrect Gfun output size.');
+
+            % Fourier-diagonal left preconditioner for the physics residuals.
+            % The final two entries (mass and arclength constraints) are unchanged.
             
-            Gmat = [J(2:end,:), zeros(Nc-1, 1);
-                    e1,          -1;
-                    (1/Nc)*t(1:Nc)', t(end)];
+            % ------------------------------------------------------------
+            % Matrix-free right preconditioner for the bordered FCH system
+            % ------------------------------------------------------------
             
-            % Factorize once per Newton iteration.
-            [Lfac, Ufac, p] = lu(Gmat, 'vector');
+            % Reduced cosine modes, in the same column-major ordering as c.
+            k2red = Grid.k2(1:Grid.Nc(1), 1:Grid.Nc(2));
+            k2red = k2red(:);
             
-            % MATLAB's LU convention:
-            % P*R\Gmat*Q = L*U
-            % Use Gmat^{-1} as the right-preconditioning action.
-            Mfun = @(v) Ufac \ (Lfac \ v(p));
+            % Principal sixth-order FCH symbol.
+            lambda = -eps^4*k2red.^3 + eta*eps^2*k2red.^2;
             
-            [dy, flag, relres, iter] = gmres( ...
-                @(y) Gmat * Mfun(y), -b, 50, 1e-10, 100);
+            % Regularize small eigenvalues while preserving their signs.
+            scale = max(abs(lambda));
+            floorval = max(1e-8*scale, 1e-12);
             
-            dx = Mfun(dy);
+            lambda_reg = lambda;
+            for j = 2:Nc
+                if abs(lambda_reg(j)) < floorval
+                    if lambda_reg(j) < 0
+                        lambda_reg(j) = -floorval;
+                    else
+                        lambda_reg(j) = floorval;
+                    end
+                end
+            end
+            
+            % Right preconditioner: approximate inverse of the bordered system.
+            Pfun = @(r) apply_fch_prec(r, lambda_reg, t, Nc);
+            
+            % Solve G*P*y = -b, then recover dx = P*y.
+
+            Afun = @(y) Gfun(Pfun(y));
+
+            [y, flag, relres, iter] = gmres( ...
+                Afun, -b, 50, 1e-8, 200);
+            
+            dx = Pfun(y);
+
+            % elapsedTime = toc; % Read elapsed time
+            % disp(['Matrix-free solver took ', num2str(elapsedTime), ' seconds.']);
+            % relres = norm(Gfun(dx) + b) / max(norm(b), 1e-14);
+            % fprintf('direct relres = %.3e\n', relres);
+
             
             % fprintf('GMRES: flag=%d, relres=%.3e, iterations=%d\n', ...
             %     flag, relres, iter(1)*50 + iter(2));
@@ -672,6 +746,23 @@ for step = 1:max_steps
                 fprintf(['  GMRES failure: flag=%d, relres=%.3e, ' ...
                     'iterations=%d, ||b||=%.3e\n'], ...
                     flag, relres, iter(2), norm(b));
+                fprintf('Trying direct method')
+
+                F_curr = compute_mu_cos(c_curr, eps, eta, Grid);
+
+                J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
+
+                Fm = zeros(1, Nc+1);     Fm(1) = 1; Fm(end) = -1;
+                Jm = zeros(Nc-1, 1);
+
+                G = [J(2:end,:), Jm; Fm; [(1/Nc)*t(1:end-1); t(end)]'];
+
+                b = [F_curr(2:end); 
+                    c_curr(1) - m_curr;
+                    (1/Nc)*(c_curr - c)'*t(1:end-1) + (m_curr - m)*t(end) - ds];
+
+                dx = G \ (-b);             
+
             end
 
             if any(~isfinite(dx))
@@ -824,6 +915,7 @@ for step = 1:max_steps
     t = A \ [zeros(Nc, 1); 1];
     t = t / sqrt((1/Nc)*sum(t(1:end-1).^2) + t(end)^2);
 
+
 end
 
 if strcmp(diag.stop_reason, 'max_steps_reached')
@@ -832,16 +924,69 @@ end
 
 end
 
-function y = build_G(u, z, eps, eta, Grid, Nc, t)
+function y = G_matrix_free(v, u, eps, eta, Grid, Nc, t)
 
-dc = z(1:Nc);
-dm = z(Nc+1);
+    % v = [dc; dm], with Nc cosine coefficients and one mass variable.
+    dc = v(1:Nc);
+    dm = v(end);
 
-Jdc = fch_jac_cos(u, dc, eps, eta, Grid);
+    % Matrix-free Jacobian-vector product: Nc x 1.
+    q = fch_jac_cos(u, dc, eps, eta, Grid);
+    q = q(:);
 
-y = [Jdc(2:end);
-    dc(1) - dm;
-    (1/Nc) * (t(1:Nc)' * dc) + t(end) * dm];
+    % Match J(2:end,:)*dc from the original bordered matrix.
+    y_physics = q(2:end);
 
+    % Mass constraint row: dc(1) - dm.
+    y_mass = dc(1) - dm;
+
+    % Arclength constraint row.
+    y_arc = (1/Nc) * t(1:Nc).' * dc + t(end)*dm;
+
+    % Total output length: (Nc-1) + 1 + 1 = Nc+1.
+    y = [y_physics; y_mass; y_arc];
 end
+
+function z = apply_block_prec(r, Pphys, Nc)
+    z = zeros(size(r));
+    z(1:Nc-1) = Pphys(r(1:Nc-1));
+    z(Nc:end) = r(Nc:end);
+end
+
+function z = apply_fch_prec(r, lambda, t, Nc)
+% Approximate inverse of the bordered system:
+%   physics rows: diagonal Fourier-symbol approximation
+%   mass row:     dc(1) - dm
+%   arclength row: tangent constraint
+
+    r = r(:);
+    z = zeros(Nc+1, 1);
+
+    % Approximate the physics solve for cosine modes 2:Nc.
+    dc = zeros(Nc, 1);
+    dc(2:Nc) = r(1:Nc-1) ./ lambda(2:Nc);
+
+    % Border residuals.
+    rmass = r(Nc);
+    rarc  = r(Nc+1);
+
+    % Solve the mass and arclength equations for dc(1) and dm.
+    denom = t(1)/Nc + t(end);
+
+    if abs(denom) < 1e-12
+        % Degenerate border approximation: avoid division by zero.
+        denom = sign(denom + (denom == 0))*1e-12;
+    end
+
+    tangent_contribution = (t(2:Nc).' * dc(2:Nc))/Nc;
+
+    dc(1) = (rarc - tangent_contribution + t(end)*rmass) ...
+            / denom;
+
+    dm = dc(1) - rmass;
+
+    z(1:Nc) = dc;
+    z(end) = dm;
+end
+
 
