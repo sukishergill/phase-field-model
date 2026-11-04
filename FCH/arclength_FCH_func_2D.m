@@ -48,6 +48,8 @@ function [u_vals, E_vals, m_vals, diagnostics] = arclength_FCH_func_2D(u0, m0, e
 
 % eps = 0.1;      eta = eps^2;
 
+tic;
+
 % generate grid
 dim = 2;
 Lx = 2*pi;      Ly = 2*pi;
@@ -75,7 +77,7 @@ c = reduce_cos(ck, Grid.N, Grid.Nc);      % restrict to the cosine (even) subspa
 % trivial constant branch instead (this is the "energy locked at -eta/4"
 % failure mode). Pre-relax with a robust (if slower) gradient descent
 % before handing the profile to Newton.
-gd_maxit = 4000;
+gd_maxit = 5000;
 gd_tol = 1e-3;
 [c, gd_resid] = gradient_descent_cos(c, eps, eta, Grid, gd_maxit, gd_tol);
 
@@ -86,7 +88,7 @@ gd_tol = 1e-3;
 % at all). Follow up with a plain, fixed-mass Newton polish: it converges
 % much faster once reasonably close, which is exactly the regime
 % gradient descent's plateau should leave us in.
-polish_maxit = 50;
+polish_maxit = 100;
 polish_tol = 1e-8;
 [c, polish_resid] = newton_polish_cos(c, m0, eps, eta, Grid, polish_maxit, polish_tol);
 
@@ -114,8 +116,8 @@ t0 = initialize_t(u, c, eps, eta, Grid);
 % point, then splice the two histories into one continuous array.
 
 ds_start = 1E-6;
-ds_max = 5E-4;
-max_steps = 10000;
+ds_max = 1;
+max_steps = 5000;
 loop_tol = 20 * ds_max;     % closed-loop detection threshold, in (c,m)-space
 
 % Two-sided bound: folds can send either direction's branch past either
@@ -150,6 +152,9 @@ diagnostics = struct( ...
     'stability', stability, ...
     'inc', diag_inc, ...
     'dec', diag_dec);
+
+elapsedTime = toc;
+disp(['Continuation run time:', num2str(elapsedTime), ' seconds.']);
 
 end
 
@@ -375,7 +380,7 @@ resid_hist = zeros(maxit, 1);
 
 for it = 1:maxit
     mu = compute_mu_cos(c, eps, eta, Grid);
-    resid_hist(it) = norm(mu);
+    resid_hist(it) = norm(mu(2:end));
 
     if mod(it, 100) == 0
         fprintf("  gradient descent it %d: norm(mu)=%e  dtau=%e\n", it, resid_hist(it), dtau);
@@ -491,9 +496,9 @@ for it = 1:maxit
         warning('Matrix-free GMRES did not converge');
     end
 
-    if flag ~= 0 || ~all(isfinite(dc))
-        error('Matrix-free GMRES failed. Inspect the preconditioner and conditioning.');
-    end
+    % if flag ~= 0 || ~all(isfinite(dc))
+    %     error('Matrix-free GMRES failed. Inspect the preconditioner and conditioning.');
+    % end
 
 
     dc = [0; dc];
@@ -648,31 +653,33 @@ for step = 1:max_steps
             Gmat = [J(2:end,:), zeros(Nc-1, 1);
                     e1,          -1;
                     (1/Nc)*t(1:Nc)', t(end)];
-            
-            % Factorize once per Newton iteration.
-            [Lfac, Ufac, p] = lu(Gmat, 'vector');
-            
-            % MATLAB's LU convention:
-            % P*R\Gmat*Q = L*U
-            % Use Gmat^{-1} as the right-preconditioning action.
-            Mfun = @(v) Ufac \ (Lfac \ v(p));
-            
-            [dy, flag, relres, iter] = gmres( ...
-                @(y) Gmat * Mfun(y), -b, 50, 1e-10, 100);
-            
-            dx = Mfun(dy);
-            
-            % fprintf('GMRES: flag=%d, relres=%.3e, iterations=%d\n', ...
-            %     flag, relres, iter(1)*50 + iter(2));
-            % fprintf('Actual linear residual: %.3e\n', ...
-            %     norm(Gmat*dx + b)/max(norm(b), 1e-14));
 
-            if flag ~= 0
-                % warning('Matrix-free GMRES did not converge');
-                fprintf(['  GMRES failure: flag=%d, relres=%.3e, ' ...
-                    'iterations=%d, ||b||=%.3e\n'], ...
-                    flag, relres, iter(2), norm(b));
-            end
+            dx = Gmat \ (-b);
+            
+            % % % % % Factorize once per Newton iteration.
+            % % % % [Lfac, Ufac, p] = lu(Gmat, 'vector');
+            % % % % 
+            % % % % % MATLAB's LU convention:
+            % % % % % P*R\Gmat*Q = L*U
+            % % % % % Use Gmat^{-1} as the right-preconditioning action.
+            % % % % Mfun = @(v) Ufac \ (Lfac \ v(p));
+            % % % % 
+            % % % % [dy, flag, relres, iter] = gmres( ...
+            % % % %     @(y) Gmat * Mfun(y), -b, 50, 1e-10, 100);
+            % % % % 
+            % % % % dx = Mfun(dy);
+            % % % % 
+            % % % % % fprintf('GMRES: flag=%d, relres=%.3e, iterations=%d\n', ...
+            % % % % %     flag, relres, iter(1)*50 + iter(2));
+            % % % % % fprintf('Actual linear residual: %.3e\n', ...
+            % % % % %     norm(Gmat*dx + b)/max(norm(b), 1e-14));
+            % % % % 
+            % % % % if flag ~= 0
+            % % % %     % warning('Matrix-free GMRES did not converge');
+            % % % %     fprintf(['  GMRES failure: flag=%d, relres=%.3e, ' ...
+            % % % %         'iterations=%d, ||b||=%.3e\n'], ...
+            % % % %         flag, relres, iter(2), norm(b));
+            % % % % end
 
             if any(~isfinite(dx))
                 warning('Non-finite Newton correction at step %d.', step);
