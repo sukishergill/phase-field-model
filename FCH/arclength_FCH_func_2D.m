@@ -738,7 +738,14 @@ u_vals_out{1} = u;
 J0 = fch_jac_matrix_cos(u, c, eps, eta, Grid);
 stability_out = 2*all(real(eig(J0(2:end,2:end))) < 0) - 1;
 
-  c0 = c;
+% corrector settings (see the corrector loop below)
+res_tol = 1e-8;         % converged when norm(b) < res_tol
+newton_max = 12;        % iterations before the step is rejected
+div_factor = 10;        % residual growth per iteration that counts as divergence
+J_chord = J0;           % Jacobian at the last accepted point, reused by the corrector
+e1 = zeros(1, Nc);      e1(1) = 1;
+
+c0 = c;
 m0 = m;
 ds = ds_start;
 ds_min = ds_start * 1e-2;
@@ -761,136 +768,82 @@ for step = 1:max_steps
         ck_curr = expand_cos(c_curr, Grid.N, Grid.Nc);
         u_curr = real(ifftn(ck_curr * N));
 
-        % corrector (Newton)
+        % corrector (Newton on the bordered system), with three safeguards:
+        %   - A step counts as converged only when the RESIDUAL norm(b) is
+        %     below res_tol. A small update alone is not enough: near a
+        %     singular Jacobian the update can be small at a point that is
+        %     not a solution.
+        %   - It fails (-> rejected step and smaller ds, below) as soon as
+        %     the residual or the update is non-finite, the residual grows
+        %     by more than div_factor in one iteration, or newton_max
+        %     iterations have been used.
+        %   - The linear solve is direct, and the Jacobian is reused.
+        %     Iterations start with J_chord, the dense Jacobian already
+        %     built at the last accepted point (for its tangent and
+        %     stability check), and it is rebuilt at the current iterate
+        %     only when an iteration reduces the residual by less than 4x.
+        %     The factorization of the bordered matrix is reused the same
+        %     way, so most iterations cost one back-substitution.
         its = 0;
-        ndx = 1;
-        converged_tight = false;
-        linear_failed = false;
-        J_final = [];   % Jacobian at the converged point, once we have one --
-                        % reused below for the tangent update and stability
-                        % check instead of rebuilding it from scratch.
+        success = false;
+        bnorm_prev = inf;
+        J = J_chord;
+        Gdec = [];
+        arc_row = (1/Nc) * t(1:Nc)';    % arclength row of the bordered system
 
-        while its < 100 && ndx > 1e-6
+        while true
 
             F_curr = compute_mu_cos(c_curr, eps, eta, Grid);
 
             b = [F_curr(2:end); c_curr(1) - m_curr;...
-                (1/Nc)*(c_curr - c)'*t(1:end-1) + (m_curr - m)*t(end) - ds];
+                arc_row * (c_curr - c) + (m_curr - m)*t(end) - ds];
+            bnorm = norm(b);
 
-            % % % % J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
-            % % % % 
-            % % % % e1 = zeros(1, Nc);
-            % % % % e1(1) = 1;
-            % % % % 
-            % % % % Gmat = [J(2:end,:), zeros(Nc-1, 1);
-            % % % %         e1,          -1;
-            % % % %         (1/Nc)*t(1:Nc)', t(end)];
-            % % % % 
-            % % % % dx = Gmat \ (-b);
-
-            % Matrix-free bordered Jacobian action.
-            % % Gfun = @(z) build_G(u_curr, z, eps, eta, Grid, Nc, t);
-            % % 
-            % % % [dx, flag, relres, iter] = gmres( ...
-            % % %     Gfun, -b, 50, 1e-8, 200);
-            % % 
-            % % Mfun = @(v) precondition_G(v,eps,eta,Grid,Nc);
-            % % 
-            % % [dx,flag,relres,iter] = gmres( ...
-            % %     Gfun,-b,50,1e-8,20,Mfun);
-
-            % ------------------------------------------------------------
-            % Matrix-free right preconditioner for the bordered FCH system
-            % ------------------------------------------------------------
-            
-            Gfun = @(v) G_matrix_free( ...
-                v, u_curr, eps, eta, Grid, Nc, t);
-
-            % Check dimensions once before GMRES.
-            vtest = zeros(Nc+1, 1);
-            ytest = Gfun(vtest);
-            assert(numel(ytest) == Nc+1, 'Incorrect Gfun output size.');
-
-            % Reduced cosine modes, in the same column-major ordering as c.
-            k2red = Grid.k2(1:Grid.Nc(1), 1:Grid.Nc(2));
-            k2red = k2red(:);
-            
-            % Principal sixth-order FCH symbol.
-            lambda = -eps^4*k2red.^3 + eta*eps^2*k2red.^2;
-            
-            % Regularize small eigenvalues while preserving their signs.
-            scale = max(abs(lambda));
-            floorval = max(1e-8*scale, 1e-12);
-            
-            lambda_reg = lambda;
-            for j = 2:Nc
-                if abs(lambda_reg(j)) < floorval
-                    if lambda_reg(j) < 0
-                        lambda_reg(j) = -floorval;
-                    else
-                        lambda_reg(j) = floorval;
-                    end
-                end
+            if ~isfinite(bnorm) || bnorm > div_factor * bnorm_prev
+                break       % diverging: reject the step
             end
-            
-            % Right preconditioner: approximate inverse of the bordered system.
-            Pfun = @(r) apply_fch_prec(r, lambda_reg, t, Nc);
-            
-            % Solve G*P*y = -b, then recover dx = P*y.
 
-            Afun = @(y) Gfun(Pfun(y));
-
-            [y, flag, relres, iter] = gmres( ...
-                Afun, -b, 50, 1e-7, 200);
-            
-            dx = Pfun(y);
-            
-            if flag ~= 0 || any(~isfinite(dx))
-                fprintf('  GMRES failed: flag=%d, relres=%e\n', ...
-                    flag, relres);
-                
-                linear_failed = true;
+            if bnorm < res_tol
+                success = true;
                 break
             end
 
+            if its >= newton_max
+                break       % too slow: reject the step
+            end
+
+            if its > 0 && bnorm > 0.25 * bnorm_prev
+                % slow contraction with the reused Jacobian: refresh it
+                J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
+                Gdec = [];
+            end
+
+            if isempty(Gdec)
+                Gdec = decomposition([J(2:end,:), zeros(Nc-1, 1);
+                                      e1,          -1;
+                                      arc_row,     t(end)]);
+            end
+
+            dx = Gdec \ (-b);
 
             if any(~isfinite(dx))
-                warning('Non-finite Newton correction at step %d.', step);
+                break       % reject the step
             end
 
-            c_new = c_curr + dx(1:end-1);
-            ck_new = expand_cos(c_new, Grid.N, Grid.Nc);
-            u_new = real(ifftn(ck_new * N));
+            c_curr = c_curr + dx(1:end-1);
+            m_curr = m_curr + dx(end);
+            u_curr = real(ifftn(expand_cos(c_curr, Grid.N, Grid.Nc) * N));
 
-            m_new = m_curr + dx(end);
-            m_curr = m_new;
-            c_curr = c_new;
-            u_curr = u_new;
-
-            if norm(dx) < 1e-8 && norm(b) < 1e-8
-                converged_tight = true;
-                % One extra Jacobian build here, at the now-converged point
-                % -- this replaces the separate rebuild that used to happen
-                % in the "update tangent" step below and the stability
-                % check, rather than adding a third build on top of them.
-                J_final = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
-                break
-            end
-            ndx = norm(dx);
+            bnorm_prev = bnorm;
             its = its + 1;
 
         end
 
-        success = ~linear_failed && ...
-            (converged_tight || (ndx <= 1e-6));
-
-
-        if success && isempty(J_final)
-            % Exited via the loose ndx<=1e-6 threshold rather than the
-            % tight break above -- still need a Jacobian at the converged
-            % point for reuse below.
+        % Jacobian at the converged point: reused below for the tangent
+        % update and the stability check, and as J_chord for the next step.
+        J_final = [];
+        if success
             J_final = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
-
         end
 
         % Even when Newton nominally converges, severe local
@@ -938,6 +891,7 @@ for step = 1:max_steps
     ck = expand_cos(c, Grid.N, Grid.Nc);
     u = u_curr;
     m = m_curr;
+    J_chord = J_final;
     s_accum = s_accum + ds;
 
     E = SSAV_FCH_helpers.compute_E_direct(u, ck * N, eps, eta, Grid);
@@ -1012,73 +966,11 @@ end
 
 end
 
-function y = G_matrix_free(v, u, eps, eta, Grid, Nc, t)
-
-    % v = [dc; dm], with Nc cosine coefficients and one mass variable.
-    dc = v(1:Nc);
-    dm = v(end);
-
-    % Matrix-free Jacobian-vector product: Nc x 1.
-    q = fch_jac_cos(u, dc, eps, eta, Grid);
-    q = q(:);
-
-    % Match J(2:end,:)*dc from the original bordered matrix.
-    y_physics = q(2:end);
-
-    % Mass constraint row: dc(1) - dm.
-    y_mass = dc(1) - dm;
-
-    % Arclength constraint row.
-    y_arc = (1/Nc) * t(1:Nc).' * dc + t(end)*dm;
-
-    % Total output length: (Nc-1) + 1 + 1 = Nc+1.
-    y = [y_physics; y_mass; y_arc];
-end
-
 function z = apply_block_prec(r, Pphys, Nc)
     z = zeros(size(r));
     z(1:Nc-1) = Pphys(r(1:Nc-1));
     z(Nc:end) = r(Nc:end);
 end
-
-function z = apply_fch_prec(r, lambda, t, Nc)
-% Approximate inverse of the bordered system:
-%   physics rows: diagonal Fourier-symbol approximation
-%   mass row:     dc(1) - dm
-%   arclength row: tangent constraint
-
-    r = r(:);
-    z = zeros(Nc+1, 1);
-
-    % Approximate the physics solve for cosine modes 2:Nc.
-    dc = zeros(Nc, 1);
-    dc(2:Nc) = r(1:Nc-1) ./ lambda(2:Nc);
-
-    % Border residuals.
-    rmass = r(Nc);
-    rarc  = r(Nc+1);
-
-    % Solve the mass and arclength equations for dc(1) and dm.
-    denom = t(1)/Nc + t(end);
-
-    if abs(denom) < 1e-12
-        % Degenerate border approximation: avoid division by zero.
-        denom = sign(denom + (denom == 0))*1e-12;
-    end
-
-    tangent_contribution = (t(2:Nc).' * dc(2:Nc))/Nc;
-
-    dc(1) = (rarc - tangent_contribution + t(end)*rmass) ...
-            / denom;
-
-    dm = dc(1) - rmass;
-
-    z(1:Nc) = dc;
-    z(end) = dm;
-end
-
-
-
 
 % function y = build_G(u, z, eps, eta, Grid, Nc, t)
 % 
