@@ -66,6 +66,21 @@ Ncy = Grid.N(2)/2 + 1;
 
 Grid.Nc = [Ncx, Ncy];       % number of independent cosine (even) Fourier coefficients
 
+% Weights of the arclength inner product on the reduced coefficients.
+% Each reduced coefficient c(i,j) stands for 1, 2 or 4 entries of the full
+% ck (interior indices are mirrored in each direction), so by Parseval
+%   sum(Grid.wc .* c.^2) = mean((u - mean(u)).^2)
+% with the mean mode c(1) given weight 0: it equals m, which the arclength
+% norm counts separately. One unit of arclength is then an RMS change of 1
+% in the profile (or a change of 1 in m), independent of the grid size.
+% (The previous (1/Nc)*c'*c weighting made the profile part ~Nc times too
+% light, so the arclength constraint was in effect "dm = ds" and did not
+% limit how far the profile could move in one step.)
+w1 = [1; 2*ones(Ncx - 2, 1); 1];
+w2 = [1; 2*ones(Ncy - 2, 1); 1];
+Grid.wc = reshape(w1 * w2', [], 1);
+Grid.wc(1) = 0;
+
 ck = fftn(u0) / prod(N);
 c = reduce_cos(ck, Grid.N, Grid.Nc);      % restrict to the cosine (even) subspace
 
@@ -116,9 +131,9 @@ t0 = initialize_t(u, c, eps, eta, Grid);
 % point, then splice the two histories into one continuous array.
 
 ds_start = 1E-6;
-ds_max = 0.01;
+ds_max = 0.05;              % in the weighted norm above: RMS profile change per step
 max_steps = 5000;
-loop_tol = 20 * ds_max;     % closed-loop detection threshold, in (c,m)-space
+loop_tol = ds_max;          % closed-loop detection threshold (weighted norm): within one step of the start
 
 % Two-sided bound: folds can send either direction's branch past either
 % boundary (an "increasing m" branch can fold over and start decreasing,
@@ -243,7 +258,7 @@ rhs = [zeros(Nc-1, 1); 1];
 dc_dm = A0 \ rhs;
 
 t = [dc_dm; 1];
-t = t / norm(t, 2);
+t = t / sqrt(sum(Grid.wc .* t(1:end-1).^2) + t(end)^2);     % same norm as extend_branch
 
 end
 
@@ -689,6 +704,10 @@ function [data_out, u_vals_out, stability_out, diag1] = extend_branch(c, m, u, t
     ds_start, ds_max, max_steps, m_bounds, loop_tol)
 % Extends the FCH continuation branch from (c, m) along tangent t.
 %
+% Arclength is measured in the weighted norm
+%   ||(c, m)||^2 = sum(Grid.wc .* c.^2) + m^2  =  mean((u - m)^2) + m^2
+% (see Grid.wc in the main function), so ds is an RMS change of the profile.
+%
 % Step size is adaptive, keyed off how many Newton iterations the
 % corrector needed:
 %   - if the corrector fails to converge within its iteration cap, the
@@ -714,7 +733,7 @@ function [data_out, u_vals_out, stability_out, diag1] = extend_branch(c, m, u, t
 %     direction we started extending in, or
 %   - the branch closes into a loop: the current (c, m) state comes back
 %     within loop_tol of the starting point, after having moved at least
-%     a little way from it first (so this can't fire immediately), or
+%     4*loop_tol away from it first (so this can't fire immediately), or
 %   - max_steps is reached, or
 %   - ds underflows while retrying a rejected step (a robustness stop).
 %
@@ -750,7 +769,7 @@ m0 = m;
 ds = ds_start;
 ds_min = ds_start * 1e-2;
 s_accum = 0;
-min_loop_s = 30 * ds_max;
+left_start = false;     % set once the branch has moved 4*loop_tol away from the start
 prev_disp = NaN;    % no reference displacement yet for the very first step
 
 diag1.stop_reason = 'max_steps_reached';    % default; overridden below if
@@ -789,7 +808,7 @@ for step = 1:max_steps
         bnorm_prev = inf;
         J = J_chord;
         Gdec = [];
-        arc_row = (1/Nc) * t(1:Nc)';    % arclength row of the bordered system
+        arc_row = (Grid.wc .* t(1:Nc))';    % arclength row: weighted tangent
 
         while true
 
@@ -857,7 +876,7 @@ for step = 1:max_steps
         % many iterations, so that on its own isn't a reliable sign of
         % having landed on the wrong branch. A large jump is treated as a
         % rejected step, exactly like an outright convergence failure.
-        this_disp = sqrt((1/Nc)*sum((c_curr - c).^2) + (m_curr - m)^2);
+        this_disp = sqrt(sum(Grid.wc .* (c_curr - c).^2) + (m_curr - m)^2);
         jump_ref = max(ds, prev_disp);
         suspicious = success && ~isnan(prev_disp) && this_disp > 10*jump_ref;
 
@@ -937,9 +956,13 @@ for step = 1:max_steps
         break
     end
 
-    % stop if the branch has closed into a loop back to the start
-    if s_accum > min_loop_s
-        dist_to_start = sqrt(sum((c - c0).^2) + (m - m0)^2);
+    % stop if the branch has closed into a loop back to the start:
+    % same weighted norm as the steps, and armed once the branch has moved
+    % 4*loop_tol away (a fixed arclength threshold before testing can be
+    % longer than one lap, so a short loop ran around more than once)
+    dist_to_start = sqrt(sum(Grid.wc .* (c - c0).^2) + (m - m0)^2);
+    left_start = left_start || dist_to_start > 4*loop_tol;
+    if left_start
         if dist_to_start < loop_tol
             fprintf('  extend_branch: closed loop detected at step %d (dist to start=%e, s=%.4f)\n', ...
                 step, dist_to_start, s_accum);
@@ -954,9 +977,9 @@ for step = 1:max_steps
     % corrector above) instead of rebuilding the Jacobian a third time.
     Jm = zeros(Nc-1, 1);
     Fm = zeros(1, Nc+1);     Fm(1) = 1; Fm(end) = -1;
-    A = [J_final(2:end,:), Jm; Fm; [(1/Nc)*t(1:end-1); t(end)]'];
+    A = [J_final(2:end,:), Jm; Fm; [Grid.wc.*t(1:end-1); t(end)]'];
     t = A \ [zeros(Nc, 1); 1];
-    t = t / sqrt((1/Nc)*sum(t(1:end-1).^2) + t(end)^2);
+    t = t / sqrt(sum(Grid.wc .* t(1:end-1).^2) + t(end)^2);
 
 end
 
