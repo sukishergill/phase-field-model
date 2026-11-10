@@ -66,6 +66,21 @@ Ncy = Grid.N(2)/2 + 1;
 
 Grid.Nc = [Ncx, Ncy];       % number of independent cosine (even) Fourier coefficients
 
+% Weights of the arclength inner product on the reduced coefficients.
+% Each reduced coefficient c(i,j) stands for 1, 2 or 4 entries of the full
+% ck (interior indices are mirrored in each direction), so by Parseval
+%   sum(Grid.wc .* c.^2) = mean((u - mean(u)).^2)
+% with the mean mode c(1) given weight 0: it equals m, which the arclength
+% norm counts separately. One unit of arclength is then an RMS change of 1
+% in the profile (or a change of 1 in m), independent of the grid size.
+% (The previous (1/Nc)*c'*c weighting made the profile part ~Nc times too
+% light, so the arclength constraint was in effect "dm = ds" and did not
+% limit how far the profile could move in one step.)
+w1 = [1; 2*ones(Ncx - 2, 1); 1];
+w2 = [1; 2*ones(Ncy - 2, 1); 1];
+Grid.wc = reshape(w1 * w2', [], 1);
+Grid.wc(1) = 0;
+
 ck = fftn(u0) / prod(N);
 c = reduce_cos(ck, Grid.N, Grid.Nc);      % restrict to the cosine (even) subspace
 
@@ -116,9 +131,9 @@ t0 = initialize_t(u, c, eps, eta, Grid);
 % point, then splice the two histories into one continuous array.
 
 ds_start = 1E-6;
-ds_max = 0.01;
+ds_max = 0.05;              % in the weighted norm above: RMS profile change per step
 max_steps = 5000;
-loop_tol = 20 * ds_max;     % closed-loop detection threshold, in (c,m)-space
+loop_tol = ds_max;          % closed-loop detection threshold (weighted norm): within one step of the start
 
 % Two-sided bound: folds can send either direction's branch past either
 % boundary (an "increasing m" branch can fold over and start decreasing,
@@ -243,7 +258,7 @@ rhs = [zeros(Nc-1, 1); 1];
 dc_dm = A0 \ rhs;
 
 t = [dc_dm; 1];
-t = t / norm(t, 2);
+t = t / sqrt(sum(Grid.wc .* t(1:end-1).^2) + t(end)^2);     % same norm as extend_branch
 
 end
 
@@ -689,6 +704,10 @@ function [data_out, u_vals_out, stability_out, diag1] = extend_branch(c, m, u, t
     ds_start, ds_max, max_steps, m_bounds, loop_tol)
 % Extends the FCH continuation branch from (c, m) along tangent t.
 %
+% Arclength is measured in the weighted norm
+%   ||(c, m)||^2 = sum(Grid.wc .* c.^2) + m^2  =  mean((u - m)^2) + m^2
+% (see Grid.wc in the main function), so ds is an RMS change of the profile.
+%
 % Step size is adaptive, keyed off how many Newton iterations the
 % corrector needed:
 %   - if the corrector fails to converge within its iteration cap, the
@@ -714,7 +733,7 @@ function [data_out, u_vals_out, stability_out, diag1] = extend_branch(c, m, u, t
 %     direction we started extending in, or
 %   - the branch closes into a loop: the current (c, m) state comes back
 %     within loop_tol of the starting point, after having moved at least
-%     a little way from it first (so this can't fire immediately), or
+%     4*loop_tol away from it first (so this can't fire immediately), or
 %   - max_steps is reached, or
 %   - ds underflows while retrying a rejected step (a robustness stop).
 %
@@ -738,12 +757,19 @@ u_vals_out{1} = u;
 J0 = fch_jac_matrix_cos(u, c, eps, eta, Grid);
 stability_out = 2*all(real(eig(J0(2:end,2:end))) < 0) - 1;
 
-  c0 = c;
+% corrector settings (see the corrector loop below)
+res_tol = 1e-8;         % converged when norm(b) < res_tol
+newton_max = 12;        % iterations before the step is rejected
+div_factor = 10;        % residual growth per iteration that counts as divergence
+J_chord = J0;           % Jacobian at the last accepted point, reused by the corrector
+e1 = zeros(1, Nc);      e1(1) = 1;
+
+c0 = c;
 m0 = m;
 ds = ds_start;
 ds_min = ds_start * 1e-2;
 s_accum = 0;
-min_loop_s = 30 * ds_max;
+left_start = false;     % set once the branch has moved 4*loop_tol away from the start
 prev_disp = NaN;    % no reference displacement yet for the very first step
 
 diag1.stop_reason = 'max_steps_reached';    % default; overridden below if
@@ -761,136 +787,82 @@ for step = 1:max_steps
         ck_curr = expand_cos(c_curr, Grid.N, Grid.Nc);
         u_curr = real(ifftn(ck_curr * N));
 
-        % corrector (Newton)
+        % corrector (Newton on the bordered system), with three safeguards:
+        %   - A step counts as converged only when the RESIDUAL norm(b) is
+        %     below res_tol. A small update alone is not enough: near a
+        %     singular Jacobian the update can be small at a point that is
+        %     not a solution.
+        %   - It fails (-> rejected step and smaller ds, below) as soon as
+        %     the residual or the update is non-finite, the residual grows
+        %     by more than div_factor in one iteration, or newton_max
+        %     iterations have been used.
+        %   - The linear solve is direct, and the Jacobian is reused.
+        %     Iterations start with J_chord, the dense Jacobian already
+        %     built at the last accepted point (for its tangent and
+        %     stability check), and it is rebuilt at the current iterate
+        %     only when an iteration reduces the residual by less than 4x.
+        %     The factorization of the bordered matrix is reused the same
+        %     way, so most iterations cost one back-substitution.
         its = 0;
-        ndx = 1;
-        converged_tight = false;
-        linear_failed = false;
-        J_final = [];   % Jacobian at the converged point, once we have one --
-                        % reused below for the tangent update and stability
-                        % check instead of rebuilding it from scratch.
+        success = false;
+        bnorm_prev = inf;
+        J = J_chord;
+        Gdec = [];
+        arc_row = (Grid.wc .* t(1:Nc))';    % arclength row: weighted tangent
 
-        while its < 100 && ndx > 1e-6
+        while true
 
             F_curr = compute_mu_cos(c_curr, eps, eta, Grid);
 
             b = [F_curr(2:end); c_curr(1) - m_curr;...
-                (1/Nc)*(c_curr - c)'*t(1:end-1) + (m_curr - m)*t(end) - ds];
+                arc_row * (c_curr - c) + (m_curr - m)*t(end) - ds];
+            bnorm = norm(b);
 
-            % % % % J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
-            % % % % 
-            % % % % e1 = zeros(1, Nc);
-            % % % % e1(1) = 1;
-            % % % % 
-            % % % % Gmat = [J(2:end,:), zeros(Nc-1, 1);
-            % % % %         e1,          -1;
-            % % % %         (1/Nc)*t(1:Nc)', t(end)];
-            % % % % 
-            % % % % dx = Gmat \ (-b);
-
-            % Matrix-free bordered Jacobian action.
-            % % Gfun = @(z) build_G(u_curr, z, eps, eta, Grid, Nc, t);
-            % % 
-            % % % [dx, flag, relres, iter] = gmres( ...
-            % % %     Gfun, -b, 50, 1e-8, 200);
-            % % 
-            % % Mfun = @(v) precondition_G(v,eps,eta,Grid,Nc);
-            % % 
-            % % [dx,flag,relres,iter] = gmres( ...
-            % %     Gfun,-b,50,1e-8,20,Mfun);
-
-            % ------------------------------------------------------------
-            % Matrix-free right preconditioner for the bordered FCH system
-            % ------------------------------------------------------------
-            
-            Gfun = @(v) G_matrix_free( ...
-                v, u_curr, eps, eta, Grid, Nc, t);
-
-            % Check dimensions once before GMRES.
-            vtest = zeros(Nc+1, 1);
-            ytest = Gfun(vtest);
-            assert(numel(ytest) == Nc+1, 'Incorrect Gfun output size.');
-
-            % Reduced cosine modes, in the same column-major ordering as c.
-            k2red = Grid.k2(1:Grid.Nc(1), 1:Grid.Nc(2));
-            k2red = k2red(:);
-            
-            % Principal sixth-order FCH symbol.
-            lambda = -eps^4*k2red.^3 + eta*eps^2*k2red.^2;
-            
-            % Regularize small eigenvalues while preserving their signs.
-            scale = max(abs(lambda));
-            floorval = max(1e-8*scale, 1e-12);
-            
-            lambda_reg = lambda;
-            for j = 2:Nc
-                if abs(lambda_reg(j)) < floorval
-                    if lambda_reg(j) < 0
-                        lambda_reg(j) = -floorval;
-                    else
-                        lambda_reg(j) = floorval;
-                    end
-                end
+            if ~isfinite(bnorm) || bnorm > div_factor * bnorm_prev
+                break       % diverging: reject the step
             end
-            
-            % Right preconditioner: approximate inverse of the bordered system.
-            Pfun = @(r) apply_fch_prec(r, lambda_reg, t, Nc);
-            
-            % Solve G*P*y = -b, then recover dx = P*y.
 
-            Afun = @(y) Gfun(Pfun(y));
-
-            [y, flag, relres, iter] = gmres( ...
-                Afun, -b, 50, 1e-7, 200);
-            
-            dx = Pfun(y);
-            
-            if flag ~= 0 || any(~isfinite(dx))
-                fprintf('  GMRES failed: flag=%d, relres=%e\n', ...
-                    flag, relres);
-                
-                linear_failed = true;
+            if bnorm < res_tol
+                success = true;
                 break
             end
 
+            if its >= newton_max
+                break       % too slow: reject the step
+            end
+
+            if its > 0 && bnorm > 0.25 * bnorm_prev
+                % slow contraction with the reused Jacobian: refresh it
+                J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
+                Gdec = [];
+            end
+
+            if isempty(Gdec)
+                Gdec = decomposition([J(2:end,:), zeros(Nc-1, 1);
+                                      e1,          -1;
+                                      arc_row,     t(end)]);
+            end
+
+            dx = Gdec \ (-b);
 
             if any(~isfinite(dx))
-                warning('Non-finite Newton correction at step %d.', step);
+                break       % reject the step
             end
 
-            c_new = c_curr + dx(1:end-1);
-            ck_new = expand_cos(c_new, Grid.N, Grid.Nc);
-            u_new = real(ifftn(ck_new * N));
+            c_curr = c_curr + dx(1:end-1);
+            m_curr = m_curr + dx(end);
+            u_curr = real(ifftn(expand_cos(c_curr, Grid.N, Grid.Nc) * N));
 
-            m_new = m_curr + dx(end);
-            m_curr = m_new;
-            c_curr = c_new;
-            u_curr = u_new;
-
-            if norm(dx) < 1e-8 && norm(b) < 1e-8
-                converged_tight = true;
-                % One extra Jacobian build here, at the now-converged point
-                % -- this replaces the separate rebuild that used to happen
-                % in the "update tangent" step below and the stability
-                % check, rather than adding a third build on top of them.
-                J_final = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
-                break
-            end
-            ndx = norm(dx);
+            bnorm_prev = bnorm;
             its = its + 1;
 
         end
 
-        success = ~linear_failed && ...
-            (converged_tight || (ndx <= 1e-6));
-
-
-        if success && isempty(J_final)
-            % Exited via the loose ndx<=1e-6 threshold rather than the
-            % tight break above -- still need a Jacobian at the converged
-            % point for reuse below.
+        % Jacobian at the converged point: reused below for the tangent
+        % update and the stability check, and as J_chord for the next step.
+        J_final = [];
+        if success
             J_final = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
-
         end
 
         % Even when Newton nominally converges, severe local
@@ -904,7 +876,7 @@ for step = 1:max_steps
         % many iterations, so that on its own isn't a reliable sign of
         % having landed on the wrong branch. A large jump is treated as a
         % rejected step, exactly like an outright convergence failure.
-        this_disp = sqrt((1/Nc)*sum((c_curr - c).^2) + (m_curr - m)^2);
+        this_disp = sqrt(sum(Grid.wc .* (c_curr - c).^2) + (m_curr - m)^2);
         jump_ref = max(ds, prev_disp);
         suspicious = success && ~isnan(prev_disp) && this_disp > 10*jump_ref;
 
@@ -938,6 +910,7 @@ for step = 1:max_steps
     ck = expand_cos(c, Grid.N, Grid.Nc);
     u = u_curr;
     m = m_curr;
+    J_chord = J_final;
     s_accum = s_accum + ds;
 
     E = SSAV_FCH_helpers.compute_E_direct(u, ck * N, eps, eta, Grid);
@@ -983,9 +956,13 @@ for step = 1:max_steps
         break
     end
 
-    % stop if the branch has closed into a loop back to the start
-    if s_accum > min_loop_s
-        dist_to_start = sqrt(sum((c - c0).^2) + (m - m0)^2);
+    % stop if the branch has closed into a loop back to the start:
+    % same weighted norm as the steps, and armed once the branch has moved
+    % 4*loop_tol away (a fixed arclength threshold before testing can be
+    % longer than one lap, so a short loop ran around more than once)
+    dist_to_start = sqrt(sum(Grid.wc .* (c - c0).^2) + (m - m0)^2);
+    left_start = left_start || dist_to_start > 4*loop_tol;
+    if left_start
         if dist_to_start < loop_tol
             fprintf('  extend_branch: closed loop detected at step %d (dist to start=%e, s=%.4f)\n', ...
                 step, dist_to_start, s_accum);
@@ -1000,9 +977,9 @@ for step = 1:max_steps
     % corrector above) instead of rebuilding the Jacobian a third time.
     Jm = zeros(Nc-1, 1);
     Fm = zeros(1, Nc+1);     Fm(1) = 1; Fm(end) = -1;
-    A = [J_final(2:end,:), Jm; Fm; [(1/Nc)*t(1:end-1); t(end)]'];
+    A = [J_final(2:end,:), Jm; Fm; [Grid.wc.*t(1:end-1); t(end)]'];
     t = A \ [zeros(Nc, 1); 1];
-    t = t / sqrt((1/Nc)*sum(t(1:end-1).^2) + t(end)^2);
+    t = t / sqrt(sum(Grid.wc .* t(1:end-1).^2) + t(end)^2);
 
 end
 
@@ -1012,73 +989,11 @@ end
 
 end
 
-function y = G_matrix_free(v, u, eps, eta, Grid, Nc, t)
-
-    % v = [dc; dm], with Nc cosine coefficients and one mass variable.
-    dc = v(1:Nc);
-    dm = v(end);
-
-    % Matrix-free Jacobian-vector product: Nc x 1.
-    q = fch_jac_cos(u, dc, eps, eta, Grid);
-    q = q(:);
-
-    % Match J(2:end,:)*dc from the original bordered matrix.
-    y_physics = q(2:end);
-
-    % Mass constraint row: dc(1) - dm.
-    y_mass = dc(1) - dm;
-
-    % Arclength constraint row.
-    y_arc = (1/Nc) * t(1:Nc).' * dc + t(end)*dm;
-
-    % Total output length: (Nc-1) + 1 + 1 = Nc+1.
-    y = [y_physics; y_mass; y_arc];
-end
-
 function z = apply_block_prec(r, Pphys, Nc)
     z = zeros(size(r));
     z(1:Nc-1) = Pphys(r(1:Nc-1));
     z(Nc:end) = r(Nc:end);
 end
-
-function z = apply_fch_prec(r, lambda, t, Nc)
-% Approximate inverse of the bordered system:
-%   physics rows: diagonal Fourier-symbol approximation
-%   mass row:     dc(1) - dm
-%   arclength row: tangent constraint
-
-    r = r(:);
-    z = zeros(Nc+1, 1);
-
-    % Approximate the physics solve for cosine modes 2:Nc.
-    dc = zeros(Nc, 1);
-    dc(2:Nc) = r(1:Nc-1) ./ lambda(2:Nc);
-
-    % Border residuals.
-    rmass = r(Nc);
-    rarc  = r(Nc+1);
-
-    % Solve the mass and arclength equations for dc(1) and dm.
-    denom = t(1)/Nc + t(end);
-
-    if abs(denom) < 1e-12
-        % Degenerate border approximation: avoid division by zero.
-        denom = sign(denom + (denom == 0))*1e-12;
-    end
-
-    tangent_contribution = (t(2:Nc).' * dc(2:Nc))/Nc;
-
-    dc(1) = (rarc - tangent_contribution + t(end)*rmass) ...
-            / denom;
-
-    dm = dc(1) - rmass;
-
-    z(1:Nc) = dc;
-    z(end) = dm;
-end
-
-
-
 
 % function y = build_G(u, z, eps, eta, Grid, Nc, t)
 % 
