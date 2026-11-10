@@ -1,7 +1,7 @@
-function [u_vals, E_vals, m_vals, diagnostics] = arclength_FCH_func_2D(u0, m0, eps, eta)
+function [u_vals, E_vals, m_vals, diag1nostics] = arclength_FCH_func_2D(u0, m0, eps, eta, Grid)
 % ARCLENGTH_FCH_FUNC  Pseudo-arclength continuation of FCH steady states.
 %
-% [u_vals, E_vals, m_vals, diagnostics] = arclength_FCH_func(u0, m0)
+% [u_vals, E_vals, m_vals, diag1nostics] = arclength_FCH_func(u0, m0)
 %
 % Uses a cosine-only (even-symmetric) representation: u is assumed even
 % about the domain center, so its Fourier coefficients ck are real and
@@ -31,7 +31,7 @@ function [u_vals, E_vals, m_vals, diagnostics] = arclength_FCH_func_2D(u0, m0, e
 %            increasing-m end).
 %   E_vals - 1xK vector of energies, aligned with u_vals.
 %   m_vals - 1xK vector of masses, aligned with u_vals.
-%   diagnostics - struct with fields:
+%   diag1nostics - struct with fields:
 %       gd_resid        residual history from the initial gradient descent
 %       polish_resid    residual history from the fixed-mass Newton polish
 %                       that follows gradient descent (see
@@ -43,7 +43,7 @@ function [u_vals, E_vals, m_vals, diagnostics] = arclength_FCH_func_2D(u0, m0, e
 %                       mass-conserving subspace, has negative real
 %                       part), -1 otherwise. Only the sign is kept, not
 %                       the full spectrum (see extend_branch below).
-%       inc, dec        per-direction diagnostic structs from
+%       inc, dec        per-direction diag1nostic structs from
 %                       extend_branch (stop_reason, steps, final_ds)
 
 % eps = 0.1;      eta = eps^2;
@@ -51,18 +51,18 @@ function [u_vals, E_vals, m_vals, diagnostics] = arclength_FCH_func_2D(u0, m0, e
 tic;
 
 % generate grid
-dim = 2;
-Lx = 2*pi;      Ly = 2*pi;
-L = [Lx, Ly];
-
-Nx = size(u0, 2);       Ny = size(u0, 1);
-% N = [Nx, Ny];
-
-Grid = SSAV_FCH_helpers.generate_Grid(L, [Nx, Ny], dim);
+% dim = 2;
+% Lx = 2*pi;      Ly = 2*pi;
+% L = [Lx, Ly];
+% 
+% Nx = size(u0, 2);       Ny = size(u0, 1);
+% % N = [Nx, Ny];
+% 
+% Grid = SSAV_FCH_helpers.generate_Grid(L, [Nx, Ny], dim);
 N = prod(Grid.N);
 
-Ncx = Nx/2 + 1;
-Ncy = Ny/2 + 1;
+Ncx = Grid.N(1)/2 + 1;
+Ncy = Grid.N(2)/2 + 1;
 
 Grid.Nc = [Ncx, Ncy];       % number of independent cosine (even) Fourier coefficients
 
@@ -116,7 +116,7 @@ t0 = initialize_t(u, c, eps, eta, Grid);
 % point, then splice the two histories into one continuous array.
 
 ds_start = 1E-6;
-ds_max = 1;
+ds_max = 0.01;
 max_steps = 5000;
 loop_tol = 20 * ds_max;     % closed-loop detection threshold, in (c,m)-space
 
@@ -127,11 +127,11 @@ loop_tol = 20 * ds_max;     % closed-loop detection threshold, in (c,m)-space
 m_bounds = [0, 1];
 
 fprintf('=== extending in increasing m ===\n');
-[data_inc, uvals_inc, stab_inc, diag_inc] = extend_branch(c, m, u, t0, eps, eta, Grid, ...
+[data_inc, uvals_inc, stab_inc, diag1_inc] = extend_branch(c, m, u, t0, eps, eta, Grid, ...
     ds_start, ds_max, max_steps, m_bounds, loop_tol);
 
 fprintf('=== extending in decreasing m ===\n');
-[data_dec, uvals_dec, stab_dec, diag_dec] = extend_branch(c, m, u, -t0, eps, eta, Grid, ...
+[data_dec, uvals_dec, stab_dec, diag1_dec] = extend_branch(c, m, u, -t0, eps, eta, Grid, ...
     ds_start, ds_max, max_steps, m_bounds, loop_tol);
 
 % Splice: reversed decreasing branch (from its far end back to the shared
@@ -145,13 +145,13 @@ stability = [fliplr(stab_dec), stab_inc(2:end)];
 m_vals = data(1, :);
 E_vals = data(2, :);
 
-diagnostics = struct( ...
+diag1nostics = struct( ...
     'gd_resid', gd_resid, ...
     'polish_resid', polish_resid, ...
     't0', t0, ...
     'stability', stability, ...
-    'inc', diag_inc, ...
-    'dec', diag_dec);
+    'inc', diag1_inc, ...
+    'dec', diag1_dec);
 
 elapsedTime = toc;
 disp(['Continuation run time:', num2str(elapsedTime), ' seconds.']);
@@ -296,30 +296,95 @@ phase_y = exp(2i*pi*ky*(N(2)/2-1)/N(2));
 
 phase = phase_y * phase_x;
 
-ck_derot = ck_full .* phase;
+D = ck_full .* phase;
 
-c = real(ck_derot(1:Nc(1), 1:Nc(2)));
+A = D(1:Nc(1), 1:Nc(2));
 
-for i = 1:Nc(1)
-    for j = 1:Nc(2)
+% Reflection indices.
+ix = 1:Nc(1);
+iy = 1:Nc(2);
 
-        ix = N(1) - i + 2;
-        iy = N(2) - j + 2;
+ix(2:Nc(1)-1) = N(1) - (2:Nc(1)-1) + 2;
+iy(2:Nc(2)-1) = N(2) - (2:Nc(2)-1) + 2;
 
-        if i > 1 && i < Nc(1)
-            c(i,j) = real(0.5*(ck_derot(i,j) + ck_derot(ix,j)));
-        end
-
-        if j > 1 && j < Nc(2)
-            c(i,j) = real(0.5*(c(i,j) + ck_derot(i,iy)));
-        end
-
-    end
+% Average reflected x coefficients.
+if Nc(1) > 2
+    idx = 2:Nc(1)-1;
+    A(idx,:) = 0.5*(A(idx,:) + D(ix(idx),1:Nc(2)));
 end
 
-c = c(:);
+% Average reflected y coefficients.
+if Nc(2) > 2
+    idx = 2:Nc(2)-1;
+    A(:,idx) = 0.5*(A(:,idx) + D(1:Nc(1),iy(idx)));
+end
+
+c = real(A(:));
+
+% ck_derot = ck_full .* phase;
+% 
+% c = real(ck_derot(1:Nc(1), 1:Nc(2)));
+% 
+% for i = 1:Nc(1)
+%     for j = 1:Nc(2)
+% 
+%         ix = N(1) - i + 2;
+%         iy = N(2) - j + 2;
+% 
+%         if i > 1 && i < Nc(1)
+%             c(i,j) = real(0.5*(ck_derot(i,j) + ck_derot(ix,j)));
+%         end
+% 
+%         if j > 1 && j < Nc(2)
+%             c(i,j) = real(0.5*(c(i,j) + ck_derot(i,iy)));
+%         end
+% 
+%     end
+% end
+% 
+% c = c(:);
 
 end
+
+function C = reduce_cos_batch(CK, N, Nc)
+% Vectorized reduction for a batch of Fourier coefficient arrays.
+
+% B = size(CK,3);
+
+kx = 0:N(1)-1;
+ky = (0:N(2)-1)';
+
+phase_x = exp(2i*pi*kx*(N(1)/2-1)/N(1));
+phase_y = exp(2i*pi*ky*(N(2)/2-1)/N(2));
+
+phase = reshape(phase_y*phase_x,N(1),N(2),1);
+
+D = CK .* phase;
+
+A = D(1:Nc(1),1:Nc(2),:);
+
+ix = 1:Nc(1);
+iy = 1:Nc(2);
+
+if Nc(1)>2
+    ix(2:Nc(1)-1) = N(1)-(2:Nc(1)-1)+2;
+    idx = 2:Nc(1)-1;
+
+    A(idx,:,:) = 0.5*(A(idx,:,:) + D(ix(idx),1:Nc(2),:));
+end
+
+if Nc(2)>2
+    iy(2:Nc(2)-1) = N(2)-(2:Nc(2)-1)+2;
+    idx = 2:Nc(2)-1;
+
+    A(:,idx,:) = 0.5*(A(:,idx,:) + D(1:Nc(1),iy(idx),:));
+end
+
+C = reshape(real(A),Nc(1)*Nc(2),[]);
+
+end
+
+
 
 function mu_c = compute_mu_cos(c, eps, eta, Grid)
 ck_full = expand_cos(c, Grid.N, Grid.Nc);
@@ -339,7 +404,38 @@ function J = fch_jac_matrix_cos(u, c, eps, eta, Grid)
 Nc = prod(Grid.Nc);
 J = zeros(Nc, Nc);
 
+% e = zeros(Nc, 1);
+
+batch_size = 32;
+
+for first = 1:batch_size:Nc
+
+    last = min(first+batch_size-1,Nc);
+    idx = first:last;
+
+    V = zeros(Nc,numel(idx));
+    V(sub2ind(size(V),idx,1:numel(idx))) = 1;
+
+    J(:,idx) = fch_jac_cos_batch(u,V,eps,eta,Grid);
+
+end
+
+% for i = 1:Nc
+%     e(i) = 1;
+%     col = fch_jac_cos(u, e, eps, eta, Grid);
+%     J(:,i) = col(:);
+%     e(i) = 0;
+% end
+end
+
+function J = fch_jac_matrix_cos_old(u, c, eps, eta, Grid)
+% Dense (N/2+1)x(N/2+1) real Jacobian in the reduced cosine basis.
+
+Nc = prod(Grid.Nc);
+J = zeros(Nc, Nc);
+
 e = zeros(Nc, 1);
+
 
 for i = 1:Nc
     e(i) = 1;
@@ -347,6 +443,86 @@ for i = 1:Nc
     J(:,i) = col(:);
     e(i) = 0;
 end
+
+end
+
+function CK = expand_cos_batch(C, N, Nc)
+% C: Nc(1)*Nc(2) x batch_size
+% CK: N(1) x N(2) x batch_size
+
+B = size(C,2);
+
+C = reshape(C, Nc(1), Nc(2), B);
+
+CK = zeros(N(1), N(2), B);
+
+CK(1:Nc(1),1:Nc(2),:) = C;
+
+CK(Nc(1)+1:N(1),1:Nc(2),:) = ...
+    C(Nc(1)-1:-1:2,:,:);
+
+CK(:,Nc(2)+1:N(2),:) = ...
+    CK(:,Nc(2)-1:-1:2,:);
+
+kx = 0:N(1)-1;
+ky = (0:N(2)-1)';
+
+phase_x = exp(2i*pi*kx*(N(1)/2-1)/N(1));
+phase_y = exp(2i*pi*ky*(N(2)/2-1)/N(2));
+
+phase = reshape(phase_y * phase_x, N(1), N(2), 1);
+
+CK = CK .* conj(phase);
+
+end
+
+function HV = fch_jac_cos_batch(u, VC, eps, eta, Grid)
+% Batched Jacobian-vector products in the reduced cosine basis.
+%
+% VC: Nc x B
+% HV: Nc x B
+
+N = prod(Grid.N);
+Nx = Grid.N(1);
+Ny = Grid.N(2);
+Nc = Grid.Nc;
+B = size(VC,2);
+
+% Expand all directions simultaneously.
+V = expand_cos_batch(VC, Grid.N, Nc);
+
+k2 = reshape(Grid.k2, Nx, Ny, 1);
+
+[~,dF,d2F] = SSAV_FCH_helpers.compute_F(u,0);
+d3F = 6*u;
+
+% Base-state chemical potential terms.
+% what = -eps^2*Grid.k2.*fftn(u)/N;
+what = -eps^2*Grid.k2.*fftn(u)/N - fftn(dF)/N;
+
+% Base-state w.
+w = real(ifft2(what*N));
+
+% Batched perturbations in physical space.
+dv = real(ifft2(N*V));
+
+% First Jacobian operation.
+dwhat = -eps^2*k2.*V ...
+        - fft2(d2F.*dv)/N;
+
+dw = real(ifft2(N*dwhat));
+
+% Second Jacobian operation.
+HV_full = -eps^2*k2.*dwhat ...
+          - fft2(d2F.*dw)/N ...
+          - fft2(d3F.*dv.*w)/N ...
+          + eta*dwhat;
+
+HV_full = -k2.*HV_full;
+
+% Reduce back to independent cosine coefficients.
+HV = reduce_cos_batch(HV_full, Grid.N, Nc);
+
 end
 
 
@@ -358,7 +534,7 @@ function [c, resid_hist] = gradient_descent_cos(c, eps, eta, Grid, maxit, tol)
 % of the energy. Its linear part is 6th-order in derivatives and very
 % stiff (eps^4*k^6), so a naive explicit step would need an impractically
 % tiny dtau for stability. Instead the linear part is treated implicitly
-% -- cheap here since it's diagonal in this cosine/Fourier basis -- while
+% -- cheap here since it's diag1onal in this cosine/Fourier basis -- while
 % the nonlinear remainder is explicit, with adaptive step-size control:
 % grow dtau on an accepted (energy-decreasing) step, halve and retry on
 % any step that would increase the energy. The mean/mass mode needs no
@@ -463,18 +639,18 @@ for it = 1:maxit
 
     ck = expand_cos(c, Grid.N, Grid.Nc);
     u = real(ifftn(ck * N));
-    % J = fch_jac_matrix_cos(u, c, eps, eta, Grid);
-    % A = J(2:end, 2:end);
-    % 
-    % dc = zeros(Nc, 1);
-    % dc(2:end) = J(2:end, 2:end) \ (-mu(2:end));
-    % 
-    % relres = norm(A*dc(2:end) + mu(2:end)) / max(norm(mu(2:end)), 1e-14);
-    % 
-    % fprintf('direct relres = %.3e\n', relres);
-    % 
-    % fprintf('  rcond(A) = %.3e, direct relres = %.3e\n', ...
-    %     rcond(A), relres);
+    % % J = fch_jac_matrix_cos(u, c, eps, eta, Grid);
+    % % A = J(2:end, 2:end);
+    % % 
+    % % dc = zeros(Nc, 1);
+    % % dc(2:end) = J(2:end, 2:end) \ (-mu(2:end));
+    % % 
+    % % relres = norm(A*dc(2:end) + mu(2:end)) / max(norm(mu(2:end)), 1e-14);
+    % % 
+    % % fprintf('direct relres = %.3e\n', relres);
+    % % 
+    % % fprintf('  rcond(A) = %.3e, direct relres = %.3e\n', ...
+    % %     rcond(A), relres);
 
     Jfun = @(v) reduced_Jv(u, v, eps, eta, Grid);
 
@@ -482,13 +658,13 @@ for it = 1:maxit
     k2 = k2(:);
     k2 = k2(2:end); 
 
-    pdiag = eps^4*k2.^3 + eta*eps^2*k2.^2;
+    pdiag1 = eps^4*k2.^3 + eta*eps^2*k2.^2;
 
     % Avoid division by zero or excessively small entries.
-    pmin = 1e-10 * max(1, max(abs(pdiag)));
-    pdiag = max(abs(pdiag), pmin);
+    pmin = 1e-10 * max(1, max(abs(pdiag1)));
+    pdiag1 = max(abs(pdiag1), pmin);
 
-    Mfunc = @(v) v ./ pdiag;
+    Mfunc = @(v) v ./ pdiag1;
     
     [dc, flag, relres, iter] = gmres(Jfun, -mu(2:end), 50, 1e-8, 200, Mfunc);
 
@@ -509,7 +685,7 @@ end
 
 end
 
-function [data_out, u_vals_out, stability_out, diag] = extend_branch(c, m, u, t, eps, eta, Grid, ...
+function [data_out, u_vals_out, stability_out, diag1] = extend_branch(c, m, u, t, eps, eta, Grid, ...
     ds_start, ds_max, max_steps, m_bounds, loop_tol)
 % Extends the FCH continuation branch from (c, m) along tangent t.
 %
@@ -548,7 +724,7 @@ function [data_out, u_vals_out, stability_out, diag] = extend_branch(c, m, u, t,
 % subspace J(2:end,2:end), has negative real part), -1 otherwise. Just the
 % sign is kept, not the full spectrum, to keep this cheap to store.
 %
-% diag is a struct with fields stop_reason (string), steps (number of
+% diag1 is a struct with fields stop_reason (string), steps (number of
 % accepted steps taken), and final_ds (ds at the point extension stopped).
 
 N = prod(Grid.N);
@@ -562,7 +738,7 @@ u_vals_out{1} = u;
 J0 = fch_jac_matrix_cos(u, c, eps, eta, Grid);
 stability_out = 2*all(real(eig(J0(2:end,2:end))) < 0) - 1;
 
-c0 = c;
+  c0 = c;
 m0 = m;
 ds = ds_start;
 ds_min = ds_start * 1e-2;
@@ -570,9 +746,9 @@ s_accum = 0;
 min_loop_s = 30 * ds_max;
 prev_disp = NaN;    % no reference displacement yet for the very first step
 
-diag.stop_reason = 'max_steps_reached';    % default; overridden below if
-diag.steps = max_steps;                    % something else stops us first
-diag.final_ds = ds;
+diag1.stop_reason = 'max_steps_reached';    % default; overridden below if
+diag1.steps = max_steps;                    % something else stops us first
+diag1.final_ds = ds;
 
 for step = 1:max_steps
 
@@ -589,6 +765,7 @@ for step = 1:max_steps
         its = 0;
         ndx = 1;
         converged_tight = false;
+        linear_failed = false;
         J_final = [];   % Jacobian at the converged point, once we have one --
                         % reused below for the tangent update and stability
                         % check instead of rebuilding it from scratch.
@@ -597,96 +774,89 @@ for step = 1:max_steps
 
             F_curr = compute_mu_cos(c_curr, eps, eta, Grid);
 
-            % J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);  
-            Jfun = @(v) fch_jac_cos(u_curr, [0, v(1:Nc-1)], eps, eta, Grid);
-
-            Fm = zeros(1, Nc+1);     Fm(1) = 1; Fm(end) = -1;
-            Jm = zeros(Nc-1, 1);
-
-            % G = [J(2:end,:), Jm; Fm; [(1/Nc)*t(1:end-1); t(end)]'];
-            % Gfun = @(z) [
-            %     Jfun(z(1:Nc)), Jm;
-            %     z(1) - z(end);
-            %     (1/Nc) * t(1:end-1)'*z(1:Nc) + t(end)*z(end)];
-
-            
-            % Gfun = @(z) build_G(u_curr, z, eps, eta, Grid, Nc, t);
-            % 
             b = [F_curr(2:end); c_curr(1) - m_curr;...
                 (1/Nc)*(c_curr - c)'*t(1:end-1) + (m_curr - m)*t(end) - ds];
-            % 
-            % % if any(~isfinite(G(:))) || any(~isfinite(b))
-            % %     error('Non-finite values in the continuation corrector.');
-            % % end
-            % 
-            % % dx = G \ (-b);
-            % 
-            % % Fourier-diagonal preconditioner for the FCH Jacobian block.
-            % k2 = Grid.k2(1:Grid.Nc(1), 1:Grid.Nc(2));
-            % k2 = k2(:);
-            % k2 = k2(2:end);     % exclude the zero-frequency mass mode
-            % 
-            % % Magnitude of the principal sixth-order FCH symbol.
-            % lambda = -eps^4*k2.^3 + eta*eps^2*k2.^2;
-            % 
-            % % Protect against division by zero and very small entries.
-            % pmin = 1e-8 * max(max(abs(lambda)), 1e-14);
-            % pdiag = max(abs(lambda), pmin);
-            % 
-            % % Left preconditioner: scale the physics residuals, leaving both
-            % % border equations unchanged.
-            % % Mfunc = @(v) [v(1:Nc-1)./pdiag;
-            % %               v(Nc);
-            % %               v(Nc+1)];
-            % 
-            % Mfunc = @(v) [v(1);
-            %     v(2:Nc)./pdiag;
-            %     v(Nc+1)];
-            % 
-            % [dx, flag, relres, iter] = gmres(Gfun, -b, 50, 1e-6, 100, [], Mfunc);
 
-            J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
+            % % % % J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
+            % % % % 
+            % % % % e1 = zeros(1, Nc);
+            % % % % e1(1) = 1;
+            % % % % 
+            % % % % Gmat = [J(2:end,:), zeros(Nc-1, 1);
+            % % % %         e1,          -1;
+            % % % %         (1/Nc)*t(1:Nc)', t(end)];
+            % % % % 
+            % % % % dx = Gmat \ (-b);
 
-            e1 = zeros(1, Nc);
-            e1(1) = 1;
+            % Matrix-free bordered Jacobian action.
+            % % Gfun = @(z) build_G(u_curr, z, eps, eta, Grid, Nc, t);
+            % % 
+            % % % [dx, flag, relres, iter] = gmres( ...
+            % % %     Gfun, -b, 50, 1e-8, 200);
+            % % 
+            % % Mfun = @(v) precondition_G(v,eps,eta,Grid,Nc);
+            % % 
+            % % [dx,flag,relres,iter] = gmres( ...
+            % %     Gfun,-b,50,1e-8,20,Mfun);
+
+            % ------------------------------------------------------------
+            % Matrix-free right preconditioner for the bordered FCH system
+            % ------------------------------------------------------------
             
-            Gmat = [J(2:end,:), zeros(Nc-1, 1);
-                    e1,          -1;
-                    (1/Nc)*t(1:Nc)', t(end)];
+            Gfun = @(v) G_matrix_free( ...
+                v, u_curr, eps, eta, Grid, Nc, t);
 
-            dx = Gmat \ (-b);
+            % Check dimensions once before GMRES.
+            vtest = zeros(Nc+1, 1);
+            ytest = Gfun(vtest);
+            assert(numel(ytest) == Nc+1, 'Incorrect Gfun output size.');
+
+            % Reduced cosine modes, in the same column-major ordering as c.
+            k2red = Grid.k2(1:Grid.Nc(1), 1:Grid.Nc(2));
+            k2red = k2red(:);
             
-            % % % % % Factorize once per Newton iteration.
-            % % % % [Lfac, Ufac, p] = lu(Gmat, 'vector');
-            % % % % 
-            % % % % % MATLAB's LU convention:
-            % % % % % P*R\Gmat*Q = L*U
-            % % % % % Use Gmat^{-1} as the right-preconditioning action.
-            % % % % Mfun = @(v) Ufac \ (Lfac \ v(p));
-            % % % % 
-            % % % % [dy, flag, relres, iter] = gmres( ...
-            % % % %     @(y) Gmat * Mfun(y), -b, 50, 1e-10, 100);
-            % % % % 
-            % % % % dx = Mfun(dy);
-            % % % % 
-            % % % % % fprintf('GMRES: flag=%d, relres=%.3e, iterations=%d\n', ...
-            % % % % %     flag, relres, iter(1)*50 + iter(2));
-            % % % % % fprintf('Actual linear residual: %.3e\n', ...
-            % % % % %     norm(Gmat*dx + b)/max(norm(b), 1e-14));
-            % % % % 
-            % % % % if flag ~= 0
-            % % % %     % warning('Matrix-free GMRES did not converge');
-            % % % %     fprintf(['  GMRES failure: flag=%d, relres=%.3e, ' ...
-            % % % %         'iterations=%d, ||b||=%.3e\n'], ...
-            % % % %         flag, relres, iter(2), norm(b));
-            % % % % end
+            % Principal sixth-order FCH symbol.
+            lambda = -eps^4*k2red.^3 + eta*eps^2*k2red.^2;
+            
+            % Regularize small eigenvalues while preserving their signs.
+            scale = max(abs(lambda));
+            floorval = max(1e-8*scale, 1e-12);
+            
+            lambda_reg = lambda;
+            for j = 2:Nc
+                if abs(lambda_reg(j)) < floorval
+                    if lambda_reg(j) < 0
+                        lambda_reg(j) = -floorval;
+                    else
+                        lambda_reg(j) = floorval;
+                    end
+                end
+            end
+            
+            % Right preconditioner: approximate inverse of the bordered system.
+            Pfun = @(r) apply_fch_prec(r, lambda_reg, t, Nc);
+            
+            % Solve G*P*y = -b, then recover dx = P*y.
+
+            Afun = @(y) Gfun(Pfun(y));
+
+            [y, flag, relres, iter] = gmres( ...
+                Afun, -b, 50, 1e-7, 200);
+            
+            dx = Pfun(y);
+            
+            if flag ~= 0 || any(~isfinite(dx))
+                fprintf('  GMRES failed: flag=%d, relres=%e\n', ...
+                    flag, relres);
+                
+                linear_failed = true;
+                break
+            end
+
 
             if any(~isfinite(dx))
                 warning('Non-finite Newton correction at step %d.', step);
             end
-
-            % relres = norm(G*dx + b) / max(norm(b), 1e-14);
-            % fprintf('direct relres = %.3e\n', relres);
 
             c_new = c_curr + dx(1:end-1);
             ck_new = expand_cos(c_new, Grid.N, Grid.Nc);
@@ -711,13 +881,16 @@ for step = 1:max_steps
 
         end
 
-        success = converged_tight || (ndx <= 1e-6);
+        success = ~linear_failed && ...
+            (converged_tight || (ndx <= 1e-6));
+
 
         if success && isempty(J_final)
             % Exited via the loose ndx<=1e-6 threshold rather than the
             % tight break above -- still need a Jacobian at the converged
             % point for reuse below.
             J_final = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
+
         end
 
         % Even when Newton nominally converges, severe local
@@ -752,9 +925,9 @@ for step = 1:max_steps
             ds = ds / 4;
             if ds < ds_min
                 fprintf('  extend_branch: ds underflowed at step %d -- stopping\n', step);
-                diag.stop_reason = 'ds_underflow';
-                diag.steps = step - 1;
-                diag.final_ds = ds;
+                diag1.stop_reason = 'ds_underflow';
+                diag1.steps = step - 1;
+                diag1.final_ds = ds;
                 return
             end
         end
@@ -804,9 +977,9 @@ for step = 1:max_steps
     if m <= m_bounds(1) || m >= m_bounds(2)
         fprintf('  extend_branch: m left [%.4f, %.4f] (m=%.6f) at step %d\n', ...
             m_bounds(1), m_bounds(2), m, step);
-        diag.stop_reason = 'm_bound_reached';
-        diag.steps = step;
-        diag.final_ds = ds;
+        diag1.stop_reason = 'm_bound_reached';
+        diag1.steps = step;
+        diag1.final_ds = ds;
         break
     end
 
@@ -816,9 +989,9 @@ for step = 1:max_steps
         if dist_to_start < loop_tol
             fprintf('  extend_branch: closed loop detected at step %d (dist to start=%e, s=%.4f)\n', ...
                 step, dist_to_start, s_accum);
-            diag.stop_reason = 'closed_loop';
-            diag.steps = step;
-            diag.final_ds = ds;
+            diag1.stop_reason = 'closed_loop';
+            diag1.steps = step;
+            diag1.final_ds = ds;
             break
         end
     end
@@ -833,21 +1006,113 @@ for step = 1:max_steps
 
 end
 
-if strcmp(diag.stop_reason, 'max_steps_reached')
-    diag.final_ds = ds;
+if strcmp(diag1.stop_reason, 'max_steps_reached')
+    diag1.final_ds = ds;
 end
 
 end
 
-function y = build_G(u, z, eps, eta, Grid, Nc, t)
+function y = G_matrix_free(v, u, eps, eta, Grid, Nc, t)
 
-dc = z(1:Nc);
-dm = z(Nc+1);
+    % v = [dc; dm], with Nc cosine coefficients and one mass variable.
+    dc = v(1:Nc);
+    dm = v(end);
 
-Jdc = fch_jac_cos(u, dc, eps, eta, Grid);
+    % Matrix-free Jacobian-vector product: Nc x 1.
+    q = fch_jac_cos(u, dc, eps, eta, Grid);
+    q = q(:);
 
-y = [Jdc(2:end);
-    dc(1) - dm;
-    (1/Nc) * (t(1:Nc)' * dc) + t(end) * dm];
+    % Match J(2:end,:)*dc from the original bordered matrix.
+    y_physics = q(2:end);
 
+    % Mass constraint row: dc(1) - dm.
+    y_mass = dc(1) - dm;
+
+    % Arclength constraint row.
+    y_arc = (1/Nc) * t(1:Nc).' * dc + t(end)*dm;
+
+    % Total output length: (Nc-1) + 1 + 1 = Nc+1.
+    y = [y_physics; y_mass; y_arc];
 end
+
+function z = apply_block_prec(r, Pphys, Nc)
+    z = zeros(size(r));
+    z(1:Nc-1) = Pphys(r(1:Nc-1));
+    z(Nc:end) = r(Nc:end);
+end
+
+function z = apply_fch_prec(r, lambda, t, Nc)
+% Approximate inverse of the bordered system:
+%   physics rows: diagonal Fourier-symbol approximation
+%   mass row:     dc(1) - dm
+%   arclength row: tangent constraint
+
+    r = r(:);
+    z = zeros(Nc+1, 1);
+
+    % Approximate the physics solve for cosine modes 2:Nc.
+    dc = zeros(Nc, 1);
+    dc(2:Nc) = r(1:Nc-1) ./ lambda(2:Nc);
+
+    % Border residuals.
+    rmass = r(Nc);
+    rarc  = r(Nc+1);
+
+    % Solve the mass and arclength equations for dc(1) and dm.
+    denom = t(1)/Nc + t(end);
+
+    if abs(denom) < 1e-12
+        % Degenerate border approximation: avoid division by zero.
+        denom = sign(denom + (denom == 0))*1e-12;
+    end
+
+    tangent_contribution = (t(2:Nc).' * dc(2:Nc))/Nc;
+
+    dc(1) = (rarc - tangent_contribution + t(end)*rmass) ...
+            / denom;
+
+    dm = dc(1) - rmass;
+
+    z(1:Nc) = dc;
+    z(end) = dm;
+end
+
+
+
+
+% function y = build_G(u, z, eps, eta, Grid, Nc, t)
+% 
+% dc = z(1:Nc);
+% dm = z(Nc+1);
+% 
+% Jdc = fch_jac_cos(u, dc, eps, eta, Grid);
+% 
+% y = [Jdc(2:end);
+%      dc(1) - dm;
+%      (1/Nc) * (t(1:Nc)' * dc) + t(end) * dm];
+% 
+% end
+% 
+% function z = precondition_G(v, eps, eta, Grid, Nc)
+% 
+% k2 = Grid.k2(1:Grid.Nc(1),1:Grid.Nc(2));
+% k2 = k2(:);
+% k2 = k2(2:end);
+% 
+% % Hessian preconditioner.
+% pdiag = eps^4*k2.^2 + eta*eps^2*k2;
+% 
+% pmin = 1e-10*max(1,max(abs(pdiag)));
+% pdiag = max(abs(pdiag),pmin);
+% 
+% % Approximate inverse of the physics Jacobian.
+% % J = -K*H.
+% z = zeros(Nc+1,1);
+% 
+% z(1:Nc-1) = -v(1:Nc-1)./(k2.*pdiag);
+% 
+% % Constraint equations.
+% z(Nc) = v(Nc);
+% z(Nc+1) = v(Nc+1);
+% 
+% end
