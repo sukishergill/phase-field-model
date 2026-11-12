@@ -336,29 +336,6 @@ end
 
 c = real(A(:));
 
-% ck_derot = ck_full .* phase;
-% 
-% c = real(ck_derot(1:Nc(1), 1:Nc(2)));
-% 
-% for i = 1:Nc(1)
-%     for j = 1:Nc(2)
-% 
-%         ix = N(1) - i + 2;
-%         iy = N(2) - j + 2;
-% 
-%         if i > 1 && i < Nc(1)
-%             c(i,j) = real(0.5*(ck_derot(i,j) + ck_derot(ix,j)));
-%         end
-% 
-%         if j > 1 && j < Nc(2)
-%             c(i,j) = real(0.5*(c(i,j) + ck_derot(i,iy)));
-%         end
-% 
-%     end
-% end
-% 
-% c = c(:);
-
 end
 
 function C = reduce_cos_batch(CK, N, Nc)
@@ -435,12 +412,6 @@ for first = 1:batch_size:Nc
 
 end
 
-% for i = 1:Nc
-%     e(i) = 1;
-%     col = fch_jac_cos(u, e, eps, eta, Grid);
-%     J(:,i) = col(:);
-%     e(i) = 0;
-% end
 end
 
 function J = fch_jac_matrix_cos_old(u, c, eps, eta, Grid)
