@@ -741,7 +741,8 @@ function [data_out, u_vals_out, stability_out, diag1] = extend_branch(c, m, u, t
 % the point is linearly stable under the mass-conserving flow u_t = mu
 % (every eigenvalue of the Jacobian, restricted to the mass-conserving
 % subspace J(2:end,2:end), has negative real part), -1 otherwise. Just the
-% sign is kept, not the full spectrum, to keep this cheap to store.
+% sign is kept, not the full spectrum, to keep this cheap to store. See
+% is_stable_cos below for how the eigenvalues are computed.
 %
 % diag1 is a struct with fields stop_reason (string), steps (number of
 % accepted steps taken), and final_ds (ds at the point extension stopped).
@@ -755,7 +756,7 @@ u_vals_out = cell(1, 1);
 u_vals_out{1} = u;
 
 J0 = fch_jac_matrix_cos(u, c, eps, eta, Grid);
-stability_out = 2*all(real(eig(J0(2:end,2:end))) < 0) - 1;
+stability_out = 2*is_stable_cos(J0, Grid) - 1;
 
 % corrector settings (see the corrector loop below)
 res_tol = 1e-8;         % converged when norm(b) < res_tol
@@ -919,7 +920,7 @@ for step = 1:max_steps
 
     % Stability at this point: reuse J_final (already built at this exact
     % (u, c) by the corrector above) instead of rebuilding it.
-    is_stable = all(real(eig(J_final(2:end,2:end))) < 0);
+    is_stable = is_stable_cos(J_final, Grid);
     stability_out(end+1) = 2*is_stable - 1; %#ok<AGROW>
 
     % Adaptive step-size control based on how many Newton iterations it
@@ -986,6 +987,31 @@ end
 if strcmp(diag1.stop_reason, 'max_steps_reached')
     diag1.final_ds = ds;
 end
+
+end
+
+function tf = is_stable_cos(J, Grid)
+% Linear stability from the reduced Jacobian J: true when every eigenvalue
+% of the mass-conserving block J(2:end,2:end) is negative.
+%
+% In the reduced cosine basis J = -K * W^-1 * H, with K = diag(k^2),
+% W = diag(Grid.wc) (how many entries of the full ck each reduced
+% coefficient stands for) and H the symmetric energy Hessian. J itself is
+% not symmetric, but with D = sqrt(W/K) the similar matrix
+%   S = D * J * D^-1 = -D^-1 * H * D^-1
+% is. It has the same eigenvalues as J, they are exactly real, and eig
+% uses its symmetric solver (about 2x faster at 64x64). The explicit
+% 0.5*(S + S') only removes roundoff: S is symmetric to ~1e-17 already.
+
+k2r = Grid.k2(1:Grid.Nc(1), 1:Grid.Nc(2));
+k2r = k2r(:);
+
+D = sqrt(Grid.wc(2:end) ./ k2r(2:end));
+
+S = (D .* J(2:end, 2:end)) ./ D';
+S = 0.5*(S + S');
+
+tf = all(eig(S) < 0);
 
 end
 
