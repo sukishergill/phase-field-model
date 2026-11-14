@@ -803,26 +803,125 @@ for step = 1:max_steps
                 break       % too slow: reject the step
             end
 
-            if its > 0 && bnorm > 0.25 * bnorm_prev
-                % slow contraction with the reused Jacobian: refresh it
-                J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
-                Gdec = [];
-            end
+            % % % if its > 0 && bnorm > 0.25 * bnorm_prev
+            % % %     % slow contraction with the reused Jacobian: refresh it
+            % % %     J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
+            % % %     Gdec = [];
+            % % % end
+            % % % 
+            % % % if isempty(Gdec)
+            % % %     Gdec = decomposition([J(2:end,:), zeros(Nc-1, 1);
+            % % %                           e1,          -1;
+            % % %                           arc_row,     t(end)]);
+            % % % % end
+            % % % 
+            % % % dx = Gdec \ (-b);
 
-            if isempty(Gdec)
-                Gdec = decomposition([J(2:end,:), zeros(Nc-1, 1);
-                                      e1,          -1;
-                                      arc_row,     t(end)]);
-            end
+            Gfun = @(v) G_matrix_free( ...
+                v, u_curr, eps, eta, Grid, Nc, t);
 
-            dx = Gdec \ (-b);
+            % Check dimensions once before GMRES.
+            vtest = zeros(Nc+1, 1);
+            ytest = Gfun(vtest);
+            assert(numel(ytest) == Nc+1, 'Incorrect Gfun output size.');
+
+            % Reduced cosine modes, in the same column-major ordering as c.
+            k2red = Grid.k2(1:Grid.Nc(1), 1:Grid.Nc(2));
+            k2red = k2red(:);
+            
+            % Principal sixth-order FCH symbol.
+            lambda = -eps^4*k2red.^3 + eta*eps^2*k2red.^2;
+            
+            % Regularize small eigenvalues while preserving their signs.
+            scale = max(abs(lambda));
+            floorval = max(1e-8*scale, 1e-12);
+            
+            lambda_reg = lambda;
+            for j = 2:Nc
+                if abs(lambda_reg(j)) < floorval
+                    if lambda_reg(j) < 0
+                        lambda_reg(j) = -floorval;
+                    else
+                        lambda_reg(j) = floorval;
+                    end
+                end
+            end
+            
+            % Right preconditioner: approximate inverse of the bordered system.
+            Pfun = @(r) apply_fch_prec(r, lambda_reg, t, Grid, Nc);
+            
+            % Solve G*P*y = -b, then recover dx = P*y.
+
+            Afun = @(y) Gfun(Pfun(y));
+
+            [y, flag, relres, iter] = gmres( ...
+                Afun, -b, 50, 1e-7, 200);
+            
+            dx = Pfun(y);
+
+            if flag ~= 0 || any(~isfinite(dx))
+                fprintf('  GMRES failed: flag=%d, relres=%e\n', ...
+                    flag, relres);
+                break
+            end
 
             if any(~isfinite(dx))
                 break       % reject the step
             end
 
-            c_curr = c_curr + dx(1:end-1);
-            m_curr = m_curr + dx(end);
+            alpha = 1;
+            line_search_accepted = false;
+
+            for ls = 1:12
+
+                c_trial = c_curr + alpha*dx(1:end-1);
+                m_trial = m_curr + alpha*dx(end);
+
+                F_trial = compute_mu_cos(c_trial, eps, eta, Grid);
+
+                % Force all vectors to columns
+                F_trial = reshape(F_trial, [], 1);
+                c_trial = reshape(c_trial, [], 1);
+                c = reshape(c, [], 1);
+                t = reshape(t, [], 1);
+                wc = reshape(Grid.wc, [], 1);
+                
+                % Individual residuals
+                b_physics = F_trial(2:end);
+                b_mass = c_trial(1) - m_trial;
+                
+                b_arc = sum(wc .* t(1:Nc) .* (c_trial-c)) ...
+                        + (m_trial-m)*t(end)-ds;
+                
+                % Explicit dimension checks
+                assert(size(b_physics,1) == Nc-1);
+                assert(size(b_physics,2) == 1);
+                assert(isscalar(b_mass));
+                assert(isscalar(b_arc));
+                
+                % Assemble
+                b_trial = zeros(Nc+1,1);
+                b_trial(1:Nc-1) = b_physics;
+                b_trial(Nc) = b_mass;
+                b_trial(Nc+1) = b_arc;
+
+                if norm(b_trial) < norm(b)
+                    line_search_accepted = true;
+                    break
+                end
+
+                alpha = alpha / 2;
+            end
+
+            if ~line_search_accepted
+                fprintf('  Line search failed at Newton iteration %d\n', its);
+                break
+            end
+
+            % c_curr = c_curr + dx(1:end-1);
+            % m_curr = m_curr + dx(end);
+            c_curr = c_trial;
+            m_curr = m_trial;
             u_curr = real(ifftn(expand_cos(c_curr, Grid.N, Grid.Nc) * N));
 
             bnorm_prev = bnorm;
@@ -986,45 +1085,66 @@ tf = all(eig(S) < 0);
 
 end
 
+function y = G_matrix_free(v, u, eps, eta, Grid, Nc, t)
+
+    dc = v(1:Nc);
+    dm = v(end);
+
+    % Physics equations
+    q = fch_jac_cos(u, dc, eps, eta, Grid);
+    y_physics = q(2:end);
+
+    % Mass constraint
+    y_mass = dc(1) - dm;
+
+    % Weighted arclength constraint
+    y_arc = sum(Grid.wc .* t(1:Nc) .* dc) ...
+            + t(end)*dm;
+
+    y = [y_physics; y_mass; y_arc];
+
+end
+
 function z = apply_block_prec(r, Pphys, Nc)
     z = zeros(size(r));
     z(1:Nc-1) = Pphys(r(1:Nc-1));
     z(Nc:end) = r(Nc:end);
 end
 
-% function y = build_G(u, z, eps, eta, Grid, Nc, t)
-% 
-% dc = z(1:Nc);
-% dm = z(Nc+1);
-% 
-% Jdc = fch_jac_cos(u, dc, eps, eta, Grid);
-% 
-% y = [Jdc(2:end);
-%      dc(1) - dm;
-%      (1/Nc) * (t(1:Nc)' * dc) + t(end) * dm];
-% 
-% end
-% 
-% function z = precondition_G(v, eps, eta, Grid, Nc)
-% 
-% k2 = Grid.k2(1:Grid.Nc(1),1:Grid.Nc(2));
-% k2 = k2(:);
-% k2 = k2(2:end);
-% 
-% % Hessian preconditioner.
-% pdiag = eps^4*k2.^2 + eta*eps^2*k2;
-% 
-% pmin = 1e-10*max(1,max(abs(pdiag)));
-% pdiag = max(abs(pdiag),pmin);
-% 
-% % Approximate inverse of the physics Jacobian.
-% % J = -K*H.
-% z = zeros(Nc+1,1);
-% 
-% z(1:Nc-1) = -v(1:Nc-1)./(k2.*pdiag);
-% 
-% % Constraint equations.
-% z(Nc) = v(Nc);
-% z(Nc+1) = v(Nc+1);
-% 
-% end
+function z = apply_fch_prec(r, lambda, t, Grid, Nc)
+
+    r = r(:);
+    z = zeros(Nc+1,1);
+
+    wc = Grid.wc(:);
+
+    % Approximate physics solve
+    dc = zeros(Nc,1);
+
+    dc(2:Nc) = r(1:Nc-1) ./ lambda(2:Nc);
+
+    % Border residuals
+    rmass = r(Nc);
+    rarc  = r(Nc+1);
+
+    % Weighted contribution from modes 2:Nc
+    tangent_contribution = ...
+        sum(wc(2:Nc) .* t(2:Nc) .* dc(2:Nc));
+
+    % Solve the mass and arclength equations
+    denom = wc(1)*t(1) + t(end);
+
+    if abs(denom) < 1e-12
+        error('Degenerate border preconditioner.');
+    end
+
+    dc(1) = (rarc - tangent_contribution ...
+             + t(end)*rmass) / denom;
+
+    dm = dc(1) - rmass;
+
+    z(1:Nc) = dc;
+    z(end) = dm;
+
+end
+
