@@ -6,7 +6,10 @@
 % one exact hex cell (width d, height d*sqrt(3), grid spacing ~h), and runs
 % continuation_FCH restricted to the symmetric subspace
 % (SSAV_FCH_helpers.hex_symmetry, opts.restrict), through folds and through
-% the uniform state, until the branch closes on itself or leaves m_range.
+% the uniform state, in both directions until m = 0. E(-u) = E(u), so the
+% m < 0 half of the branch is the mirror image (u -> -u, m -> -m) of the
+% m > 0 half; with the symmetry enforced the full branch is a closed loop
+% over -1 < m < 1 (for d = pi: |m| < 0.957).
 %
 % Plots E against m (solid: stable to all even perturbations of the cell,
 % dashed: unstable), with the uniform state, and profiles along the branch.
@@ -37,16 +40,22 @@ if ~hst_replot
 
     opts = struct('even', true, 'symmetry', S, 'restrict', true, ...
         'stop_on_uniform', false, 'ds_max', 0.05, 'max_steps', 3000, ...
-        'm_range', [-0.99 0.99], 'verbose', false, 'direction', 1);
+        'm_range', [0 0.99], 'verbose', false);
     t_run = tic;
-    branch = continuation_FCH(u0, Grid, Para, opts);
+    opts.direction = 1;
+    b_up = continuation_FCH(u0, Grid, Para, opts);
+    opts.direction = -1;
+    b_down = continuation_FCH(u0, Grid, Para, opts);
     run_time = toc(t_run);
-    fprintf('%d points in %.1f s, stop: %s\n', numel(branch.m), run_time, branch.stop_reason);
+    fprintf('towards larger m: %d points, stop: %s\n', numel(b_up.m), b_up.stop_reason);
+    fprintf('towards smaller m: %d points, stop: %s\n', numel(b_down.m), b_down.stop_reason);
+
+    % one branch, from the m = 0 end of the downward run through the start
+    % and along the upward run to its m = 0 end
+    branch = join_branches(b_down, b_up);
+    fprintf('%d points in %.1f s\n', numel(branch.m), run_time);
     fprintf('folds at m = %s\n', mat2str(branch.m(branch.fold), 4));
     fprintf('crosses the uniform state at m = %s\n', mat2str(branch.m(branch.cross_uniform), 4));
-
-    branch.symmetry = [];       % function handles do not save well
-    branch.opts.symmetry = [];
     save(out_file, 'branch', 'Grid', 'Para', 'hst_m0', 'hst_d', 'hst_h', 'run_time');
 else
     load(out_file, 'branch', 'Grid', 'Para', 'hst_m0', 'hst_d', 'hst_h', 'run_time');
@@ -65,11 +74,11 @@ for panel = 1:2
     plot_by_stability(branch.m, branch.E, stable, [0.85 0.33 0.10]);
     plot(NaN, NaN, '-', 'Color', [0.85 0.33 0.10], 'LineWidth', 2, 'DisplayName', 'hex (stable)');
     plot(NaN, NaN, '--', 'Color', [0.85 0.33 0.10], 'LineWidth', 2, 'DisplayName', 'hex (unstable)');
-    plot(branch.m(1), branch.E(1), 'o', 'Color', [0.85 0.33 0.10], ...
+    plot(branch.m(branch.i_start), branch.E(branch.i_start), 'o', 'Color', [0.85 0.33 0.10], ...
         'MarkerFaceColor', [0.85 0.33 0.10], 'MarkerSize', 7, 'HandleVisibility', 'off');
     xlabel('$m$', 'Interpreter', 'latex');
     ylabel('$E$', 'Interpreter', 'latex');
-    xlim([-1 1]);
+    xlim([0 1]);
     if panel == 1
         title(sprintf('hex symmetry enforced, $d = %.2f$, $\\epsilon = %.2f$', hst_d, Para.epsilon), ...
             'Interpreter', 'latex');
@@ -87,7 +96,7 @@ end
 exportgraphics(gcf, 'HexSymmetryTest_E_vs_m.png', 'Resolution', 150);
 
 %% profiles along the branch (2 x 2 cells each), evenly spaced in arclength
-s = [0, cumsum(branch.ds(2:end))];
+s = [0, cumsum(sqrt(diff(branch.m).^2 + diff(branch.amp).^2))];   % approximate arclength
 k_show = arrayfun(@(t) find(s >= t, 1), linspace(0, s(end), 13));
 k_show = unique(k_show(1:end-1), 'stable');
 figure('Position', [50 50 1500 640], 'Color', 'w');
@@ -99,6 +108,18 @@ for j = 1:numel(k_show)
     title(sprintf('m = %+.3f\n%s', branch.m(k), ternary(stable(k), 'stable', 'unstable')), 'FontSize', 10);
 end
 exportgraphics(gcf, 'HexSymmetryTest_profiles.png', 'Resolution', 110);
+
+function b = join_branches(b_down, b_up)
+% reversed downward branch followed by the upward one (start point once)
+f = {'m', 'E', 'dE', 'amp', 'n_neg', 'n_neg_full', 'fold', 'cross_uniform', 'u'};
+for i = 1:numel(f)
+    a = b_down.(f{i});
+    c = b_up.(f{i});
+    b.(f{i}) = [fliplr(a), c(2:end)];
+end
+b.i_start = numel(b_down.m);
+b.stop_reason = {b_down.stop_reason, b_up.stop_reason};
+end
 
 function plot_by_stability(m, E, stable, color)
 % solid where stable, dashed where not; segments overlap by one point
