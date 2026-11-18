@@ -106,10 +106,12 @@ end
 m = mean(u0(:));
 d = d0;
 a = Z' * (u0(:) - m);
+start_ok = true;
 if opts.polish_first
     [a, d, ok_p, res_p] = polish(a, m, d);
     if ~ok_p
-        warning('continuation_FCH_cell: starting polish did not converge (residual %.2e)', res_p);
+        warning('continuation_FCH_cell: starting polish did not converge (residual %.2e); not continuing', res_p);
+        start_ok = false;
     end
 end
 u = to_u(a, m);
@@ -128,8 +130,9 @@ warned = false;
 
 ds = opts.ds;
 stop_reason = 'max_steps';
+if ~start_ok, stop_reason = 'starting polish did not converge'; end
 tm_prev = tm;
-for step = 1:opts.max_steps
+for step = 1:start_ok*opts.max_steps
     while true
         [a1, m1, d1, its, ok, res] = corrector(a, m, d, ta, tm, td, ds, lin);
         if ok, break, end
@@ -249,13 +252,44 @@ end
     end
 
     function [a, d, ok, res] = polish(a, m, d)
-        % Newton at fixed m, with backtracking: first for a at the given d,
-        % then (optimize_d) for a and d together, with each step in d
-        % limited to 10% of d. (Solving for both from a rough start can run
+        % Newton at fixed m, with backtracking. With optimize_d:
+        %   1. solve for a at the given d;
+        %   2. walk d downhill in energy (towards G = 0) through steady
+        %      states at fixed d, each warm-started from the last, until G
+        %      changes sign, and take the secant estimate of the root;
+        %   3. Newton for a and d together, each step in d limited to 10%
+        %      of d.
+        % (Newton for both from a d far from the optimum can fail or run
         % off to the uniform state, where G = 0 for every d.)
         if fd
             fd = false;
-            [a, d] = polish(a, m, d);
+            [a, ~, ok0, res] = polish(a, m, d);
+            if ~ok0
+                fd = true;
+                ok = false;
+                return
+            end
+            [~, G] = evaluate(to_u(a, m), d);
+            s = sign(G);                % dE/dd = -G/d: energy decreases towards sign(G)
+            hstep = 0.02*d;
+            for walk = 1:300*(s ~= 0)
+                d_try = d + s*hstep;
+                [a_try, ~, ok1] = polish(a, m, d_try);
+                if ~ok1
+                    hstep = hstep / 2;
+                    if hstep < 1e-4*d, break, end
+                    continue
+                end
+                [~, G_try] = evaluate(to_u(a_try, m), d_try);
+                if sign(G_try) ~= s
+                    t = G / (G - G_try);                % secant: G = 0 at d + t*(d_try - d)
+                    a = a + t*(a_try - a);
+                    d = d + t*(d_try - d);
+                    break
+                end
+                a = a_try;  d = d_try;  G = G_try;
+                hstep = min(1.5*hstep, 0.1*d);
+            end
             fd = true;
         end
         ok = false;
