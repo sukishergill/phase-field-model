@@ -1,7 +1,8 @@
-function [u_vals, E_vals, m_vals, diag1nostics] = arclength_FCH_func_2D(u0, m0, eps, eta, Grid)
+function [u_vals, E_vals, m_vals, diag1nostics] = arclength_FCH_func_2D(u0, m0, eps, eta, Grid, opts)
 % ARCLENGTH_FCH_FUNC  Pseudo-arclength continuation of FCH steady states.
 %
-% [u_vals, E_vals, m_vals, diag1nostics] = arclength_FCH_func(u0, m0)
+% [u_vals, E_vals, m_vals, diag1nostics] = arclength_FCH_func_2D(u0, m0, eps, eta, Grid)
+% [...] = arclength_FCH_func_2D(u0, m0, eps, eta, Grid, opts)
 %
 % Uses a cosine-only (even-symmetric) representation: u is assumed even
 % about the domain center, so its Fourier coefficients ck are real and
@@ -23,6 +24,25 @@ function [u_vals, E_vals, m_vals, diag1nostics] = arclength_FCH_func_2D(u0, m0, 
 %        can converge it onto that trivial constant branch instead.
 %   m0 - initial mass (target mean value). The branch is continued in
 %        both increasing and decreasing m from this starting point.
+%   eps, eta - FCH parameters (eta1 = eta2 = eta).
+%   Grid - from SSAV_FCH_helpers.generate_Grid, same size as u0; the grid
+%        must have the same number of points in each direction.
+%   opts - optional struct; any field left out takes its default:
+%       ds_max           largest arclength step, as an RMS change of the
+%                        profile (0.01). Larger steps can cut across folds
+%                        and branch points onto other branches.
+%       max_steps        steps per direction (5000)
+%       stability_every  check linear stability at every k-th point (1).
+%                        The check needs the dense Jacobian (and eig);
+%                        0 skips it, so the dense Jacobian is built only
+%                        when the GMRES preconditioner needs refreshing.
+%                        Points without a check get stability 0.
+%
+% Linear solves in the corrector and for the tangent use right-
+% preconditioned GMRES with the matrix-free Jacobian. The preconditioner
+% is the LU factorization of the bordered matrix at an earlier point (see
+% build_preconditioner); it is rebuilt only when GMRES stops converging
+% quickly, or whenever the dense Jacobian is available anyway.
 %
 % Outputs:
 %   u_vals - 1xK cell array of profiles along the combined branch, both
@@ -41,10 +61,12 @@ function [u_vals, E_vals, m_vals, diag1nostics] = arclength_FCH_func_2D(u0, m0, 
 %                       linearly stable under u_t = mu (every eigenvalue
 %                       of the Jacobian, restricted to the
 %                       mass-conserving subspace, has negative real
-%                       part), -1 otherwise. Only the sign is kept, not
+%                       part), -1 otherwise, 0 where not checked (see
+%                       opts.stability_every). Only the sign is kept, not
 %                       the full spectrum (see extend_branch below).
 %       inc, dec        per-direction diag1nostic structs from
-%                       extend_branch (stop_reason, steps, final_ds)
+%                       extend_branch (stop_reason, steps, final_ds,
+%                       gmres_its, prec_builds)
 
 % eps = 0.1;      eta = eps^2;
 
@@ -130,9 +152,11 @@ t0 = initialize_t(u, c, eps, eta, Grid);
 % Extend the branch in both directions from the same relaxed starting
 % point, then splice the two histories into one continuous array.
 
+if nargin < 6, opts = struct(); end
 ds_start = 1E-6;
-ds_max = 0.05;              % in the weighted norm above: RMS profile change per step
-max_steps = 5000;
+ds_max = get_opt(opts, 'ds_max', 0.01);         % in the weighted norm above: RMS profile change per step
+max_steps = get_opt(opts, 'max_steps', 5000);
+stab_every = get_opt(opts, 'stability_every', 1);
 loop_tol = ds_max;          % closed-loop detection threshold (weighted norm): within one step of the start
 
 % Two-sided bound: folds can send either direction's branch past either
@@ -143,11 +167,11 @@ m_bounds = [0, 1];
 
 fprintf('=== extending in increasing m ===\n');
 [data_inc, uvals_inc, stab_inc, diag1_inc] = extend_branch(c, m, u, t0, eps, eta, Grid, ...
-    ds_start, ds_max, max_steps, m_bounds, loop_tol);
+    ds_start, ds_max, max_steps, m_bounds, loop_tol, stab_every);
 
 fprintf('=== extending in decreasing m ===\n');
 [data_dec, uvals_dec, stab_dec, diag1_dec] = extend_branch(c, m, u, -t0, eps, eta, Grid, ...
-    ds_start, ds_max, max_steps, m_bounds, loop_tol);
+    ds_start, ds_max, max_steps, m_bounds, loop_tol, stab_every);
 
 % Splice: reversed decreasing branch (from its far end back to the shared
 % starting point) followed by the increasing branch forward from the
@@ -701,7 +725,7 @@ end
 end
 
 function [data_out, u_vals_out, stability_out, diag1] = extend_branch(c, m, u, t, eps, eta, Grid, ...
-    ds_start, ds_max, max_steps, m_bounds, loop_tol)
+    ds_start, ds_max, max_steps, m_bounds, loop_tol, stab_every)
 % Extends the FCH continuation branch from (c, m) along tangent t.
 %
 % Arclength is measured in the weighted norm
@@ -735,16 +759,20 @@ function [data_out, u_vals_out, stability_out, diag1] = extend_branch(c, m, u, t
 %     within loop_tol of the starting point, after having moved at least
 %     4*loop_tol away from it first (so this can't fire immediately), or
 %   - max_steps is reached, or
-%   - ds underflows while retrying a rejected step (a robustness stop).
+%   - ds underflows while retrying a rejected step (a robustness stop), or
+%   - the tangent solve fails even with a fresh preconditioner.
 %
 % stability_out is a 1xK vector aligned with data_out's columns: +1 where
 % the point is linearly stable under the mass-conserving flow u_t = mu
 % (every eigenvalue of the Jacobian, restricted to the mass-conserving
-% subspace J(2:end,2:end), has negative real part), -1 otherwise. Just the
-% sign is kept, not the full spectrum, to keep this cheap to store.
+% subspace J(2:end,2:end), has negative real part), -1 otherwise, 0 where
+% it was not checked (only every stab_every-th point is; 0 = never). Just
+% the sign is kept, not the full spectrum, to keep this cheap to store.
 %
 % diag1 is a struct with fields stop_reason (string), steps (number of
-% accepted steps taken), and final_ds (ds at the point extension stopped).
+% accepted steps taken), final_ds (ds at the point extension stopped),
+% gmres_its (total GMRES iterations) and prec_builds (preconditioner
+% factorizations).
 
 N = prod(Grid.N);
 Nc = prod(Grid.Nc);
@@ -760,9 +788,12 @@ stability_out = 2*all(real(eig(J0(2:end,2:end))) < 0) - 1;
 % corrector settings (see the corrector loop below)
 res_tol = 1e-8;         % converged when norm(b) < res_tol
 newton_max = 12;        % iterations before the step is rejected
-div_factor = 10;        % residual growth per iteration that counts as divergence
-J_chord = J0;           % Jacobian at the last accepted point, reused by the corrector
-e1 = zeros(1, Nc);      e1(1) = 1;
+gm.restart = 40;        % GMRES iterations before the preconditioner is rebuilt
+gm.tol = 1e-7;          % GMRES relative residual
+gm.stale_its = 10;      % a solve needing more iterations marks the preconditioner stale
+P = build_preconditioner(J0, t, Grid);     % from the dense Jacobian at the start
+n_gmres = 0;
+n_builds = 1;
 
 c0 = c;
 m0 = m;
@@ -787,39 +818,27 @@ for step = 1:max_steps
         ck_curr = expand_cos(c_curr, Grid.N, Grid.Nc);
         u_curr = real(ifftn(ck_curr * N));
 
-        % corrector (Newton on the bordered system), with three safeguards:
-        %   - A step counts as converged only when the RESIDUAL norm(b) is
-        %     below res_tol. A small update alone is not enough: near a
-        %     singular Jacobian the update can be small at a point that is
-        %     not a solution.
-        %   - It fails (-> rejected step and smaller ds, below) as soon as
-        %     the residual or the update is non-finite, the residual grows
-        %     by more than div_factor in one iteration, or newton_max
-        %     iterations have been used.
-        %   - The linear solve is direct, and the Jacobian is reused.
-        %     Iterations start with J_chord, the dense Jacobian already
-        %     built at the last accepted point (for its tangent and
-        %     stability check), and it is rebuilt at the current iterate
-        %     only when an iteration reduces the residual by less than 4x.
-        %     The factorization of the bordered matrix is reused the same
-        %     way, so most iterations cost one back-substitution.
+        % corrector: Newton on the bordered system, with the linear solves
+        % done by preconditioned GMRES (solve_bordered below).
+        %   - A step counts as converged only when the residual norm(b) is
+        %     below res_tol.
+        %   - Each Newton update is damped by a backtracking line search
+        %     (alpha = 1, 1/2, 1/4, ...) until norm(b) decreases.
+        %   - It fails (-> rejected step and smaller ds, below) when GMRES
+        %     fails even with a freshly built preconditioner, the line
+        %     search cannot reduce norm(b), or newton_max iterations have
+        %     been used.
         its = 0;
         success = false;
-        bnorm_prev = inf;
-        J = J_chord;
-        Gdec = [];
-        arc_row = (Grid.wc .* t(1:Nc))';    % arclength row: weighted tangent
+        S_curr = fch_jac_prep(u_curr, eps, eta, Grid);
+        b = bordered_residual(c_curr, m_curr, c, m, t, ds, eps, eta, Grid);
 
         while true
 
-            F_curr = compute_mu_cos(c_curr, eps, eta, Grid);
-
-            b = [F_curr(2:end); c_curr(1) - m_curr;...
-                arc_row * (c_curr - c) + (m_curr - m)*t(end) - ds];
             bnorm = norm(b);
 
-            if ~isfinite(bnorm) || bnorm > div_factor * bnorm_prev
-                break       % diverging: reject the step
+            if ~isfinite(bnorm)
+                break       % reject the step
             end
 
             if bnorm < res_tol
@@ -831,38 +850,42 @@ for step = 1:max_steps
                 break       % too slow: reject the step
             end
 
-            if its > 0 && bnorm > 0.25 * bnorm_prev
-                % slow contraction with the reused Jacobian: refresh it
-                J = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
-                Gdec = [];
-            end
-
-            if isempty(Gdec)
-                Gdec = decomposition([J(2:end,:), zeros(Nc-1, 1);
-                                      e1,          -1;
-                                      arc_row,     t(end)]);
-            end
-
-            dx = Gdec \ (-b);
-
-            if any(~isfinite(dx))
+            Gop = @(v) G_matrix_free(v, S_curr, Grid, Nc, t);
+            build_J = @() fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
+            [dx, P, ok, nlin, nb] = solve_bordered(Gop, -b, P, build_J, t, Grid, gm);
+            n_gmres = n_gmres + nlin;
+            n_builds = n_builds + nb;
+            if ~ok
+                fprintf('  GMRES failed at step %d, Newton iteration %d\n', step, its);
                 break       % reject the step
             end
 
-            c_curr = c_curr + dx(1:end-1);
-            m_curr = m_curr + dx(end);
-            u_curr = real(ifftn(expand_cos(c_curr, Grid.N, Grid.Nc) * N));
+            % backtracking line search on norm(b)
+            alpha = 1;
+            line_search_ok = false;
+            for ls = 1:12
+                c_trial = c_curr + alpha*dx(1:Nc);
+                m_trial = m_curr + alpha*dx(end);
+                b_trial = bordered_residual(c_trial, m_trial, c, m, t, ds, eps, eta, Grid);
+                if norm(b_trial) < bnorm
+                    line_search_ok = true;
+                    break
+                end
+                alpha = alpha / 2;
+            end
 
-            bnorm_prev = bnorm;
+            if ~line_search_ok
+                fprintf('  Line search failed at step %d, Newton iteration %d\n', step, its);
+                break       % reject the step
+            end
+
+            c_curr = c_trial;
+            m_curr = m_trial;
+            b = b_trial;
+            u_curr = real(ifftn(expand_cos(c_curr, Grid.N, Grid.Nc) * N));
+            S_curr = fch_jac_prep(u_curr, eps, eta, Grid);
             its = its + 1;
 
-        end
-
-        % Jacobian at the converged point: reused below for the tangent
-        % update and the stability check, and as J_chord for the next step.
-        J_final = [];
-        if success
-            J_final = fch_jac_matrix_cos(u_curr, c_curr, eps, eta, Grid);
         end
 
         % Even when Newton nominally converges, severe local
@@ -900,6 +923,8 @@ for step = 1:max_steps
                 diag1.stop_reason = 'ds_underflow';
                 diag1.steps = step - 1;
                 diag1.final_ds = ds;
+                diag1.gmres_its = n_gmres;
+                diag1.prec_builds = n_builds;
                 return
             end
         end
@@ -910,17 +935,29 @@ for step = 1:max_steps
     ck = expand_cos(c, Grid.N, Grid.Nc);
     u = u_curr;
     m = m_curr;
-    J_chord = J_final;
     s_accum = s_accum + ds;
 
     E = SSAV_FCH_helpers.compute_E_direct(u, ck * N, eps, eta, Grid);
     data_out = [data_out, [m; E]];
     u_vals_out{end+1} = u; %#ok<AGROW>
 
-    % Stability at this point: reuse J_final (already built at this exact
-    % (u, c) by the corrector above) instead of rebuilding it.
-    is_stable = all(real(eig(J_final(2:end,2:end))) < 0);
-    stability_out(end+1) = 2*is_stable - 1; %#ok<AGROW>
+    % Dense Jacobian at the accepted point, only where it is needed: for
+    % the stability check (every stab_every-th point), or because the
+    % preconditioner has gone stale. Either way it then refreshes the
+    % preconditioner, with the arclength row of the tangent system below.
+    check_stab = stab_every > 0 && mod(step, stab_every) == 0;
+    J_acc = [];
+    if check_stab || P.stale
+        J_acc = fch_jac_matrix_cos(u, c, eps, eta, Grid);
+        P = build_preconditioner(J_acc, t, Grid);
+        n_builds = n_builds + 1;
+    end
+    if check_stab
+        is_stable = all(real(eig(J_acc(2:end,2:end))) < 0);
+        stability_out(end+1) = 2*is_stable - 1; %#ok<AGROW>
+    else
+        stability_out(end+1) = 0; %#ok<AGROW>  not checked
+    end
 
     % Adaptive step-size control based on how many Newton iterations it
     % took, graduated rather than a hard binary grow/shrink -- a step that
@@ -973,61 +1010,140 @@ for step = 1:max_steps
         end
     end
 
-    % update tangent -- reuse J_final (built at this exact (u, c) by the
-    % corrector above) instead of rebuilding the Jacobian a third time.
-    Jm = zeros(Nc-1, 1);
-    Fm = zeros(1, Nc+1);     Fm(1) = 1; Fm(end) = -1;
-    A = [J_final(2:end,:), Jm; Fm; [Grid.wc.*t(1:end-1); t(end)]'];
-    t = A \ [zeros(Nc, 1); 1];
-    t = t / sqrt(sum(Grid.wc .* t(1:end-1).^2) + t(end)^2);
+    % update tangent: solve the bordered system (physics rows, mass row,
+    % and the old tangent as arclength row) with right-hand side e_end,
+    % by GMRES at the accepted point
+    Gop = @(v) G_matrix_free(v, S_curr, Grid, Nc, t);
+    build_J = @() fch_jac_matrix_cos(u, c, eps, eta, Grid);
+    [t_new, P, ok, nlin, nb] = solve_bordered(Gop, [zeros(Nc, 1); 1], P, build_J, t, Grid, gm);
+    n_gmres = n_gmres + nlin;
+    n_builds = n_builds + nb;
+    if ~ok
+        fprintf('  extend_branch: tangent solve failed at step %d -- stopping\n', step);
+        diag1.stop_reason = 'tangent_failed';
+        diag1.steps = step;
+        diag1.final_ds = ds;
+        break
+    end
+    t = t_new / sqrt(sum(Grid.wc .* t_new(1:end-1).^2) + t_new(end)^2);
 
 end
 
 if strcmp(diag1.stop_reason, 'max_steps_reached')
     diag1.final_ds = ds;
 end
+diag1.gmres_its = n_gmres;
+diag1.prec_builds = n_builds;
 
 end
 
-function z = apply_block_prec(r, Pphys, Nc)
-    z = zeros(size(r));
-    z(1:Nc-1) = Pphys(r(1:Nc-1));
-    z(Nc:end) = r(Nc:end);
+function y = G_matrix_free(v, S, Grid, Nc, t)
+% Bordered Jacobian times v = [dc; dm]: physics rows J(2:end,:)*dc, the
+% mass row dc(1) - dm, and the weighted arclength row. S is the base-state
+% data from fch_jac_prep.
+
+dc = v(1:Nc);
+dm = v(end);
+
+q = fch_jac_apply(S, dc, Grid);
+
+y = [q(2:end);
+     dc(1) - dm;
+     sum(Grid.wc .* t(1:Nc) .* dc) + t(end)*dm];
+
 end
 
-% function y = build_G(u, z, eps, eta, Grid, Nc, t)
-% 
-% dc = z(1:Nc);
-% dm = z(Nc+1);
-% 
-% Jdc = fch_jac_cos(u, dc, eps, eta, Grid);
-% 
-% y = [Jdc(2:end);
-%      dc(1) - dm;
-%      (1/Nc) * (t(1:Nc)' * dc) + t(end) * dm];
-% 
-% end
-% 
-% function z = precondition_G(v, eps, eta, Grid, Nc)
-% 
-% k2 = Grid.k2(1:Grid.Nc(1),1:Grid.Nc(2));
-% k2 = k2(:);
-% k2 = k2(2:end);
-% 
-% % Hessian preconditioner.
-% pdiag = eps^4*k2.^2 + eta*eps^2*k2;
-% 
-% pmin = 1e-10*max(1,max(abs(pdiag)));
-% pdiag = max(abs(pdiag),pmin);
-% 
-% % Approximate inverse of the physics Jacobian.
-% % J = -K*H.
-% z = zeros(Nc+1,1);
-% 
-% z(1:Nc-1) = -v(1:Nc-1)./(k2.*pdiag);
-% 
-% % Constraint equations.
-% z(Nc) = v(Nc);
-% z(Nc+1) = v(Nc+1);
-% 
-% end
+function S = fch_jac_prep(u, eps, eta, Grid)
+% The parts of the Jacobian that depend only on the base state u: computed
+% once per Newton iterate instead of in every matrix-vector product.
+
+N = prod(Grid.N);
+[~, dF, d2F] = SSAV_FCH_helpers.compute_F(u, 0);
+what = -eps^2*Grid.k2.*fftn(u)/N - fftn(dF)/N;
+w = real(ifftn(what*N));
+
+S.d2F = d2F;
+S.d3Fw = 6*u.*w;        % W'''(u) * w
+S.eps = eps;
+S.eta = eta;
+
+end
+
+function Hv = fch_jac_apply(S, vc, Grid)
+% Jacobian times one reduced cosine vector vc. Same as fch_jac_cos, with
+% the base-state terms taken from S = fch_jac_prep(u, ...).
+
+N = prod(Grid.N);
+v = expand_cos(vc, Grid.N, Grid.Nc);
+dv = real(ifftn(N*v));
+
+dwhat = -S.eps^2*Grid.k2.*v - fftn(S.d2F.*dv)/N;
+dw = real(ifftn(N*dwhat));
+
+Hv = -S.eps^2*Grid.k2.*dwhat - fftn(S.d2F.*dw)/N - fftn(S.d3Fw.*dv)/N + S.eta*dwhat;
+Hv = reduce_cos(-Grid.k2.*Hv, Grid.N, Grid.Nc);
+
+end
+
+function b = bordered_residual(c_try, m_try, c, m, t, ds, eps, eta, Grid)
+% Residual of the bordered system at (c_try, m_try): physics rows, mass
+% row, and the arclength condition relative to the last accepted (c, m).
+
+Nc = numel(c);
+F = compute_mu_cos(c_try, eps, eta, Grid);
+b = [F(2:end);
+     c_try(1) - m_try;
+     sum(Grid.wc .* t(1:Nc) .* (c_try - c)) + (m_try - m)*t(end) - ds];
+
+end
+
+function P = build_preconditioner(J, t, Grid)
+% LU factorization of the bordered matrix built from a dense Jacobian J
+% and tangent t. The bordered matrix stays nonsingular at folds, so this
+% preconditioner needs no special case there.
+
+Nc = size(J, 1);
+e1 = zeros(1, Nc);   e1(1) = 1;
+P.dec = decomposition([J(2:end,:), zeros(Nc-1, 1);
+                       e1,          -1;
+                       (Grid.wc .* t(1:Nc))', t(end)]);
+P.stale = false;
+
+end
+
+function [x, P, ok, nits, nbuilds] = solve_bordered(Gop, rhs, P, build_J, t, Grid, gm)
+% Solve G*x = rhs (G applied by Gop) with right-preconditioned GMRES:
+% G*(P\y) = rhs, x = P\y. P is the factorization of the bordered matrix at
+% an earlier point (build_preconditioner). If GMRES has not converged
+% after gm.restart iterations, P is rebuilt from build_J() -- the dense
+% Jacobian at the current point -- and the solve is repeated once. A solve
+% that needs more than gm.stale_its iterations marks P stale, so that the
+% caller rebuilds it at the next accepted point.
+
+nits = 0;
+nbuilds = 0;
+for attempt = 1:2
+    [y, flag, ~, iter] = gmres(@(z) Gop(P.dec \ z), rhs, gm.restart, gm.tol, 1);
+    nits = nits + iter(2);
+    x = P.dec \ y;
+    ok = flag == 0 && all(isfinite(x));
+    if ok
+        P.stale = P.stale || iter(2) > gm.stale_its;
+        return
+    end
+    if attempt == 1
+        P = build_preconditioner(build_J(), t, Grid);
+        nbuilds = nbuilds + 1;
+    end
+end
+
+end
+
+function val = get_opt(opts, name, default)
+% opts.(name) if it is set, otherwise default
+if isfield(opts, name) && ~isempty(opts.(name))
+    val = opts.(name);
+else
+    val = default;
+end
+end
