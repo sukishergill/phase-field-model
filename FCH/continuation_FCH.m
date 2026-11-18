@@ -67,6 +67,17 @@ function branch = continuation_FCH(u0, Grid, Para, opts)
 %                    the even projection (e.g. averaging with a half-cell
 %                    shift to keep two spots identical); S must be linear,
 %                    idempotent and commute with J                ([])
+%     restrict       (even mode, with symmetry) solve in the subspace of
+%                    S only: the unknowns are an orthonormal basis of the
+%                    range of S, and the equations are S(F) = 0 (a
+%                    Galerkin projection). Needed when S commutes with J
+%                    only up to discretization error, as for
+%                    SSAV_FCH_helpers.hex_symmetry; branches then cannot
+%                    leave the symmetry class (no spots -> ovals). The
+%                    starting state is polished by Newton in the subspace
+%                    instead of newton_polish_FCH. n_neg then counts
+%                    unstable directions with the symmetry only; n_neg_full
+%                    counts them in the whole even subspace     (false)
 %     fold_tm_tol    a fold is counted when dm/ds changes sign relative
 %                    to the last value with |dm/ds| > fold_tm_tol, so
 %                    jitter on near-vertical stretches is ignored (0.01)
@@ -74,8 +85,8 @@ function branch = continuation_FCH(u0, Grid, Para, opts)
 %
 % Output: branch struct with per-point arrays
 %   m, E, dE (E - E_uniform(m)), lambda (chemical potential), amp
-%   (RMS of u - m), n_neg, lam (stab_k smallest eigenvalues, one row per
-%   point), tm (dm/ds), fold (fold in m between this point and the
+%   (RMS of u - m), n_neg, n_neg_full (restrict only, else NaN), lam
+%   (stab_k smallest eigenvalues, one row per point), tm (dm/ds), fold (fold in m between this point and the
 %   previous), bif (n_neg changed without a fold: possible branch point),
 %   cross_uniform (passed through the uniform state u = m),
 %   ds, newton_its, res; u (cell of profiles if store_u); plus Grid, Para,
@@ -88,13 +99,16 @@ opts = set_defaults(opts, struct('direction', 1, 'ds', 0.01, 'ds_min', 1e-5, ...
     'beta', 1, 'polish_first', true, 'stability', true, 'neg_tol', 1e-6, 'stab_k', 4, ...
     'store_u', true, 'stop_on_uniform', true, 'uniform_tol', 1e-4, 'uniform_cross_tol', 0.02, ...
     'verbose', true, ...
-    'symmetry', [], 'fold_tm_tol', 0.01));
+    'symmetry', [], 'restrict', false, 'fold_tm_tol', 0.01));
 solver = opts.linear_solver;
 if strcmp(solver, 'auto')
     if opts.even, solver = 'direct'; else, solver = 'gmres'; end
 end
 if strcmp(solver, 'direct') && ~opts.even
     error('continuation_FCH: the direct solver works in the even subspace (opts.even = true)');
+end
+if opts.restrict && (~strcmp(solver, 'direct') || isempty(opts.symmetry))
+    error('continuation_FCH: restrict needs the direct solver (even mode) and a symmetry');
 end
 
 sz = size(u0);
@@ -111,9 +125,25 @@ if ~isempty(opts.symmetry)
 end
 mu_fun = @(u) SSAV_FCH_helpers.steady_mu(u, Para, Grid);
 Jv_fun = @(u, v) SSAV_FCH_helpers.steady_Jv(u, v, Para, Grid);
+if opts.restrict
+    F_fun = @(u) sym(proj0(mu_fun(u)));     % Galerkin: only the symmetric part of the residual
+else
+    F_fun = @(u) proj0(mu_fun(u));
+end
 
 if strcmp(solver, 'direct')
     Z = SSAV_FCH_helpers.even_basis(sz);    % orthonormal, even, mean zero
+    if opts.restrict
+        Z_full = Z;                         % kept for n_neg_full
+        ZS = zeros(size(Z));
+        for j = 1:size(Z, 2)
+            ZS(:, j) = reshape(opts.symmetry(reshape(Z(:, j), sz)), [], 1);
+        end
+        [U, sv] = svd(ZS, 'econ');
+        sv = diag(sv);
+        Z = U(:, sv > 1e-8 * max(sv));      % orthonormal basis of the symmetric subspace
+        clear ZS U
+    end
     ne = size(Z, 2);
 else
     Pinv_sym = 1 ./ (Para.epsilon^2*Grid.k2 + opts.beta).^2;
@@ -122,7 +152,9 @@ else
 end
 
 % ---- starting point ----
-if opts.polish_first
+if opts.polish_first && opts.restrict
+    u0 = polish_restricted(sym(u0));
+elseif opts.polish_first
     u0 = newton_polish_FCH(sym(u0), Grid, Para, struct('even', opts.even, ...
         'symmetry', opts.symmetry, 'verbose', false, 'maxit', 3000));
 end
@@ -136,7 +168,7 @@ lin = linearize(m + v);         % J (and F_m) at the current point
 [tv, tm] = tangent(lin, zeros(sz), opts.direction);
 
 branch = init_branch();
-record(m + v, m, tm, 0, 0, rms(proj0(mu_fun(m + v))), lin);
+record(m + v, m, tm, 0, 0, rms(F_fun(m + v)), lin);
 if opts.verbose
     fprintf(' step     m          dE              n_neg   ds        its  note\n');
     print_point(1, '');
@@ -307,7 +339,7 @@ end
         for it_n = 1:opts.newton_maxit
             its = it_n - 1;                         % corrector updates so far
             u1 = m1 + v1;
-            Fv = proj0(mu_fun(u1));
+            Fv = F_fun(u1);
             g = sum((v1 - v0).*tv0, 'all')/n + (m1 - m0)*tm0 - ds;
             h = T' * reshape(v1 - v0, n, 1);
             res_new = rms([Fv(:); g; h / sqrt(n)]);
@@ -333,12 +365,36 @@ end
             m1 = m1 + dm;
         end
         its = opts.newton_maxit;
-        res = rms(proj0(mu_fun(m1 + v1)));
+        res = rms(F_fun(m1 + v1));
         ok = res < opts.tol;
     end
 
+    function u = polish_restricted(u)
+        % damped Newton for S(F) = 0 at fixed mass, in the symmetric subspace
+        mm = mean(u(:));
+        for it = 1:100
+            F = F_fun(u);
+            r0 = rms(F);
+            if r0 < opts.tol, break, end
+            ln = linearize(u);
+            dv = -reshape(Z * (ln.Je \ (Z' * F(:))), sz);
+            a = 1;
+            while a > 2^-12
+                u_try = sym(u + a*dv);
+                u_try = u_try - mean(u_try(:)) + mm;
+                if rms(F_fun(u_try)) < r0, break, end
+                a = a / 2;
+            end
+            u = u_try;
+        end
+        if opts.verbose
+            fprintf('restricted Newton polish: %d iterations, residual %.2e (subspace dimension %d)\n', ...
+                it - 1, rms(F_fun(u)), ne);
+        end
+    end
+
     function b = init_branch()
-        b = struct('m', [], 'E', [], 'dE', [], 'lambda', [], 'amp', [], 'n_neg', [], ...
+        b = struct('m', [], 'E', [], 'dE', [], 'lambda', [], 'amp', [], 'n_neg', [], 'n_neg_full', [], ...
             'lam', zeros(0, opts.stab_k), 'tm', [], 'fold', false(0), 'bif', false(0), ...
             'cross_uniform', false(0), ...
             'ds', [], 'newton_its', [], 'res', [], 'u', {{}}, 'u_start', u0);
@@ -375,6 +431,19 @@ end
             end
         end
         branch.n_neg(end+1) = n_neg;
+        n_neg_full = NaN;
+        if opts.stability && opts.restrict
+            % all even perturbations, not only symmetric ones
+            ne_f = size(Z_full, 2);
+            JZf = zeros(n, ne_f);
+            for c0 = 1:64:ne_f
+                cols = c0:min(c0 + 63, ne_f);
+                JZf(:, cols) = reshape(Jv_fun(u, reshape(Z_full(:, cols), [sz, numel(cols)])), n, []);
+            end
+            Jf = Z_full' * JZf;
+            n_neg_full = sum(eig((Jf + Jf') / 2) < -opts.neg_tol);
+        end
+        branch.n_neg_full(end+1) = n_neg_full;
         branch.lam(end+1, :) = lam;
         if opts.store_u
             branch.u{end+1} = u;
